@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!-- ModMux: mods known not to work together, shown in REVIEW (and warned about at start) when both are active.
+     One <pair a="FS25_ModA" b="FS25_ModB" reason="what goes wrong"/> per pair; the names are the mods' file names
+     without .zip. This list ships empty: only pairs confirmed in game belong here. Your own list goes into
+     modSettings/FS25_ModMux/knownIncompatible.xml in the same format and is read as well. -->
+<knownIncompatible>
+</knownIncompatible>

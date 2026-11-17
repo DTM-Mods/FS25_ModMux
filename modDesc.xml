@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<modDesc descVersion="116" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://validation.gdn.giants-software.com/xml/fs25/modDesc.xsd">
+    <author>DTM Mods, Fennell</author>
+    <version>1.0.0.0</version>
+    <title>
+        <en>ModMux</en>
+    </title>
+    <description>
+        <en><![CDATA[Description: Many mods hook into the same parts of the game. When two of them change the same function, Farming Simulator lets the one loaded later decide, and depending on how it was written the other one may stop working without any message. ModMux shows you every place where your mods meet, explains in plain words what happens there, and lets you decide.
+Hotkeys: none. ESC menu > ModMux page. The buttons along the bottom of the page follow the selected line.
+GitHub: https://github.com/DTM-Mods/FS25_ModMux
+
+Decide per function or for whole mods:
+- Let one mod have its way on a function: only its hook stays there.
+- Bring back a hook that another mod threw away, so both run (shared chain).
+- Rank mods against each other, overall or only for one area (wheels, HUD, economy, weather, AI...). A higher mod runs last and has the final say.
+- Three views: SIMPLE (the ranking), BY CATEGORY (area rankings), ADVANCED (each function with its complete chain of hooks).
+
+More tabs:
+- LIVE: switches and values that mods hand to ModMux, applied at once.
+- VEHICLE: readings from the vehicle you drive: speed, mass, damage, wear, engine temperature, grip and slip per wheel, the mods inside it.
+- PERFORMANCE: milliseconds per frame for each mod against your target frame rate. Park a heavy mod's per-frame work without uninstalling it.
+- REVIEW: hints with their reasons: two copies of one mod, mods cutting each other off, HUDs drawn on top of each other, pairs you listed as incompatible.
+- PROFILES: store your decisions under a name and switch back later.
+
+Safety:
+- Decisions take effect when a savegame loads, never during play.
+- Loading, saving and multiplayer sync are never touched.
+- If a start doesn't finish, the next one runs with all ModMux interventions off. An empty file MODMUX_SAFE_MODE.txt in modSettings/FS25_ModMux does the same by hand.
+- If a savegame comes up with its farms missing, saving is refused for that session.
+- Writes only into modSettings/FS25_ModMux (settings, profiles, a start marker, the summary ModMux.log). No internet connection.
+
+Console for dedicated servers: modMux, modMuxPick, modMuxPark, modMuxLevers, modMuxReport.
+Single player and multiplayer. Every computer uses its own setup; on a server, the server's setup decides what the server runs.]]></en>
+        <de><![CDATA[Beschreibung: Viele Mods greifen in dieselben Teile des Spiels ein. Ändern zwei davon dieselbe Funktion, entscheidet in Farming Simulator der später geladene, und je nach Bauweise arbeitet der andere ohne jede Meldung nicht mehr. ModMux zeigt dir jede Stelle, an der sich deine Mods treffen, erklärt in einfachen Worten, was dort passiert, und lässt dich entscheiden.
+Tastenkombinationen: keine. ESC-Menü > Seite ModMux. Die Tasten unten auf der Seite richten sich nach der gewählten Zeile.
+GitHub: https://github.com/DTM-Mods/FS25_ModMux
+
+Entscheide pro Funktion oder für ganze Mods:
+- Ein Mod setzt sich bei einer Funktion durch: nur sein Eingriff bleibt dort.
+- Hole einen Eingriff zurück, den ein anderer Mod verworfen hat, damit beide laufen (gemeinsame Kette).
+- Reihe Mods gegeneinander, allgemein oder nur für einen Bereich (Räder, HUD, Wirtschaft, Wetter, KI...). Ein höherer Mod läuft zuletzt und hat das letzte Wort.
+- Drei Ansichten: EINFACH (der Rang), NACH BEREICH (Rang je Bereich), ERWEITERT (jede Funktion mit ihrer ganzen Kette).
+
+Weitere Reiter:
+- LIVE: Schalter und Werte, die Mods an ModMux geben, gelten sofort.
+- FAHRZEUG: Messwerte des Fahrzeugs, das du fährst: Geschwindigkeit, Masse, Schaden, Abnutzung, Motortemperatur, Haftung und Schlupf je Rad, die Mods darin.
+- LEISTUNG: Millisekunden pro Bild für jeden Mod, gemessen an deiner Ziel-Bildrate. Parke die Arbeit eines schweren Mods pro Bild, ohne ihn zu deinstallieren.
+- PRÜFEN: Hinweise mit Begründung: zwei Kopien eines Mods, Mods, die sich gegenseitig abschneiden, übereinander gezeichnete HUDs, als unvereinbar eingetragene Paare.
+- PROFILE: speichere deine Entscheidungen unter einem Namen und wechsle später zurück.
+
+Sicherheit:
+- Entscheidungen greifen beim Laden eines Spielstands, nie während des Spiels.
+- Laden, Speichern und Mehrspieler-Abgleich werden nie angefasst.
+- Wird ein Start nicht fertig, sind beim nächsten alle ModMux-Eingriffe ausgeschaltet. Eine leere Datei MODMUX_SAFE_MODE.txt in modSettings/FS25_ModMux macht das von Hand.
+- Kommt ein Spielstand ohne seine Höfe hoch, wird in dieser Sitzung nicht gespeichert.
+- Schreibt nur nach modSettings/FS25_ModMux (Einstellungen, Profile, eine Startmarke, die Übersicht ModMux.log). Keine Internetverbindung.
+
+Konsole für dedizierte Server: modMux, modMuxPick, modMuxPark, modMuxLevers, modMuxReport.
+Einzel- und Mehrspieler. Jeder Rechner nutzt seine eigenen Einstellungen; auf einem Server entscheiden die des Servers, was der Server ausführt.]]></de>
+    </description>
+
+    <iconFilename>icon_ModMux.dds</iconFilename>
+    <multiplayer supported="true"/>
+    <l10n filenamePrefix="translations/l10n"/>
+
+    <extraSourceFiles>
+        <sourceFile filename="scripts/ModMuxOrigin.lua"/>
+        <sourceFile filename="scripts/ModMuxScan.lua"/>
+        <sourceFile filename="scripts/ModMuxLevers.lua"/>
+        <sourceFile filename="scripts/ModMuxPerf.lua"/>
+        <sourceFile filename="scripts/ModMuxReview.lua"/>
+        <sourceFile filename="scripts/ModMuxLive.lua"/>
+        <sourceFile filename="scripts/ModMuxVehicle.lua"/>
+        <sourceFile filename="scripts/ModMuxProfiles.lua"/>
+        <sourceFile filename="scripts/ModMuxTabs.lua"/>
+        <sourceFile filename="scripts/gui/ModMuxFrame.lua"/>
+        <sourceFile filename="scripts/ModMux.lua"/>
+    </extraSourceFiles>
+</modDesc>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <modDesc descVersion="116" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://validation.gdn.giants-software.com/xml/fs25/modDesc.xsd">
     <author>DTM Mods, Fennell</author>
-    <version>1.0.0.0</version>
+    <version>1.0.0.1</version>
     <title>
         <en>ModMux</en>
     </title>
@@ -9,6 +9,8 @@
         <en><![CDATA[Description: Many mods hook into the same parts of the game. When two of them change the same function, Farming Simulator lets the one loaded later decide, and depending on how it was written the other one may stop working without any message. ModMux shows you every place where your mods meet, explains in plain words what happens there, and lets you decide.
 Hotkeys: none. ESC menu > ModMux page. The buttons along the bottom of the page follow the selected line.
 GitHub: https://github.com/DTM-Mods/FS25_ModMux
+
+Important: keep the zip named FS25_0_ModMux.zip. The game loads mods in the order of their names, and ModMux has to load before the mods it watches: it sees every hook as it is made. Where a mod puts in its own version of a function, ModMux finds out while you play whether the hooks under it still run.
 
 Decide per function or for whole mods:
 - Let one mod have its way on a function: only its hook stays there.
@@ -28,13 +30,20 @@ Safety:
 - Loading, saving and multiplayer sync are never touched.
 - If a start doesn't finish, the next one runs with all ModMux interventions off. An empty file MODMUX_SAFE_MODE.txt in modSettings/FS25_ModMux does the same by hand.
 - If a savegame comes up with its farms missing, saving is refused for that session.
-- Writes only into modSettings/FS25_ModMux (settings, profiles, a start marker, the summary ModMux.log). No internet connection.
+- Writes only into modSettings/FS25_ModMux (settings, profiles, a start marker, what it saw while playing, the summary ModMux.log). No internet connection.
 
 Console for dedicated servers: modMux, modMuxPick, modMuxPark, modMuxLevers, modMuxReport.
-Single player and multiplayer. Every computer uses its own setup; on a server, the server's setup decides what the server runs.]]></en>
+Single player and multiplayer. Every computer uses its own setup; on a server, the server's setup decides what the server runs.
+
+Changelog 1.0.0.1:
+- Works in the normal game: finds the mod behind each hook without the developer functions the game hides (1.0.0.0 found no conflicts there).
+- The zip is now FS25_0_ModMux.zip so that it loads first. Delete FS25_ModMux.zip; the settings stay.
+- Hooks under another mod's own version of a function are checked while you play.]]></en>
         <de><![CDATA[Beschreibung: Viele Mods greifen in dieselben Teile des Spiels ein. Ändern zwei davon dieselbe Funktion, entscheidet in Farming Simulator der später geladene, und je nach Bauweise arbeitet der andere ohne jede Meldung nicht mehr. ModMux zeigt dir jede Stelle, an der sich deine Mods treffen, erklärt in einfachen Worten, was dort passiert, und lässt dich entscheiden.
 Tastenkombinationen: keine. ESC-Menü > Seite ModMux. Die Tasten unten auf der Seite richten sich nach der gewählten Zeile.
 GitHub: https://github.com/DTM-Mods/FS25_ModMux
+
+Wichtig: Lass die Zip-Datei FS25_0_ModMux.zip heißen. Das Spiel lädt Mods in der Reihenfolge ihrer Namen, und ModMux muss vor den Mods laden, die es beobachtet: es sieht jeden Eingriff, während er gemacht wird. Setzt ein Mod eine eigene Version einer Funktion ein, findet ModMux beim Spielen heraus, ob die Eingriffe darunter noch laufen.
 
 Entscheide pro Funktion oder für ganze Mods:
 - Ein Mod setzt sich bei einer Funktion durch: nur sein Eingriff bleibt dort.
@@ -54,10 +63,15 @@ Sicherheit:
 - Laden, Speichern und Mehrspieler-Abgleich werden nie angefasst.
 - Wird ein Start nicht fertig, sind beim nächsten alle ModMux-Eingriffe ausgeschaltet. Eine leere Datei MODMUX_SAFE_MODE.txt in modSettings/FS25_ModMux macht das von Hand.
 - Kommt ein Spielstand ohne seine Höfe hoch, wird in dieser Sitzung nicht gespeichert.
-- Schreibt nur nach modSettings/FS25_ModMux (Einstellungen, Profile, eine Startmarke, die Übersicht ModMux.log). Keine Internetverbindung.
+- Schreibt nur nach modSettings/FS25_ModMux (Einstellungen, Profile, eine Startmarke, was es beim Spielen gesehen hat, die Übersicht ModMux.log). Keine Internetverbindung.
 
 Konsole für dedizierte Server: modMux, modMuxPick, modMuxPark, modMuxLevers, modMuxReport.
-Einzel- und Mehrspieler. Jeder Rechner nutzt seine eigenen Einstellungen; auf einem Server entscheiden die des Servers, was der Server ausführt.]]></de>
+Einzel- und Mehrspieler. Jeder Rechner nutzt seine eigenen Einstellungen; auf einem Server entscheiden die des Servers, was der Server ausführt.
+
+Changelog 1.0.0.1:
+- Funktioniert im normalen Spiel: findet den Mod hinter jedem Eingriff ohne die Entwicklerfunktionen, die das Spiel verbirgt (1.0.0.0 fand dort keine Konflikte).
+- Die Zip-Datei heißt jetzt FS25_0_ModMux.zip, damit sie zuerst lädt. Lösche FS25_ModMux.zip; die Einstellungen bleiben.
+- Eingriffe unter der eigenen Version eines anderen Mods werden beim Spielen geprüft.]]></de>
     </description>
 
     <iconFilename>icon_ModMux.dds</iconFilename>

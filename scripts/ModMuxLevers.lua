@@ -7,6 +7,8 @@
 --   order   the changes are stacked by rank: the higher a mod ranks, the later (outer) its change, so it has the last word
 -- A plain replacement (`X.f = function ...`) can't be taken apart: what it calls is fixed inside it. It stays a block
 -- ("barrier") that only changes stacked on top of it can be moved around; removing it needs the original below it.
+-- Changes recorded under it (hidden) stay inside it; when a winner removes the replacement, the winner's own hidden
+-- changes come back on the game's original.
 
 ModMuxLevers = {}
 
@@ -119,25 +121,28 @@ end
 -- Rebuilding a chain
 ----------------------------------------------------------------------------------------------------------------
 
---- the parts of a conflict, innermost (oldest) first; changes thrown away by a later mod are marked lost
+--- the parts of a conflict, innermost (oldest) first; changes thrown away by a later mod are marked lost, changes that
+-- sit inside a plain replacement (where they may or may not run) are marked hidden
 function ModMuxLevers.units(conflict)
-    local current, lost = {}, {}
+    local current, lost, hidden = {}, {}, {}
     for i = #conflict.layers, 1, -1 do
         local layer = conflict.layers[i]
-        table.insert(current, {kind = layer.kind, fn = layer.fn, owner = layer.owner, super = layer.super,
-            trusted = layer.trusted, natural = #current + 1})
+        table.insert(current, {kind = layer.kind, fn = layer.fn, owner = layer.owner, natural = #current + 1})
     end
     for _, entry in ipairs(conflict.lost or {}) do
         table.insert(lost, {kind = entry.kind, fn = entry.fn, owner = entry.mod, lost = true, natural = 1000 + #lost})
     end
-    return current, lost
+    for _, entry in ipairs(conflict.hidden or {}) do
+        table.insert(hidden, {kind = entry.kind, fn = entry.fn, owner = entry.mod, hidden = true, natural = 500 + #hidden})
+    end
+    return current, lost, hidden
 end
 
 --- Builds the function a plan asks for. Returns func or nil, status:
 --   ok, partial (some muted parts sit inside a plain replacement and stay), same (nothing to change),
---   noBase (the game's original is unknown, a plain replacement can't be removed), unsafe (guessed chain)
+--   noBase (the game's original is unknown, a plain replacement can't be removed), unsafe (no Utils helper)
 function ModMuxLevers.build(conflict, plan)
-    local current, lost = ModMuxLevers.units(conflict)
+    local current, lost, hidden = ModMuxLevers.units(conflict)
     local isMod = ModMuxOrigin.isMod
 
     local function keep(unit)
@@ -168,12 +173,13 @@ function ModMuxLevers.build(conflict, plan)
                 partial = true
             end
         end
-    else
-        for _, unit in ipairs(current) do
-            if unit.kind == "replace" and unit.super ~= nil and not unit.trusted then
-                return nil, "unsafe"
+        -- changes inside the replacement stay inside it, muted or not
+        for _, unit in ipairs(hidden) do
+            if not keep(unit) then
+                partial = true
             end
         end
+    else
         base = conflict.floor or ModMuxScan.bestFloor[conflict.id]
         if base == nil then
             return nil, "noBase"
@@ -199,6 +205,18 @@ function ModMuxLevers.build(conflict, plan)
         end
     end
     local broughtBack = 0
+    -- the replacement that held hidden changes is gone: the ones that stay come back on the game's original
+    -- (they were made before the replacement, so they go innermost)
+    if barrier == nil then
+        local position = 1
+        for _, unit in ipairs(hidden) do
+            if keep(unit) then
+                table.insert(rest, position, unit)
+                position = position + 1
+                broughtBack = broughtBack + 1
+            end
+        end
+    end
     for _, unit in ipairs(lost) do
         local wanted = plan.mode == "shared" or (plan.mode == "winner" and unit.owner == plan.mod)
             or (plan.mode == "order" and priority(unit.owner) > replacerPriority)

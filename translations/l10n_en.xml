@@ -90,15 +90,19 @@
         <text name="mm_layer_append" text="adds its code after the rest"/>
         <text name="mm_layer_prepend" text="adds its code before the rest"/>
         <text name="mm_layer_overwrite" text="wraps the rest and decides whether it runs"/>
-        <text name="mm_layer_replaceFull" text="replaced the function completely"/>
-        <text name="mm_layer_replaceKeeps" text="replaced the function, keeps the old one (probably calls it)"/>
-        <text name="mm_layer_replaceGuess" text="replaced the function, seems to keep the old one"/>
+        <text name="mm_layer_replace" text="put in its own version of the function"/>
         <text name="mm_layer_floor" text="the game's original"/>
+        <text name="mm_layer_hidden" text="INSIDE IT, NOT KNOWN YET: %s (%s)"/>
+        <text name="mm_layer_hiddenRuns" text="inside it, still runs: %s (%s)"/>
         <text name="mm_layer_lost" text="NOT RUNNING: %s (%s)"/>
         <text name="mm_ex_lost" text="%s changed this function, but %s replaced it afterwards without passing that change on, so the change from %s never runs."/>
         <text name="mm_ex_lostLikely" text="%s changed this function, then %s put in its own version and the change is gone (ModMux saw the change made, not removed). The change from %s most likely never runs."/>
         <text name="mm_ex_lostFix" text="Pick a winner, or turn on the shared chain so both changes run (the lost one goes back on top)."/>
-        <text name="mm_ex_replaced" text="%s put in its own version of this function. ModMux can't tell for sure whether it still runs the changes below it from %s."/>
+        <text name="mm_ex_replaced" text="%s put in its own version of this function. The changes below it from %s only run if that version passes them on."/>
+        <text name="mm_ex_replacedWatch" text="ModMux finds out while you play: once the function has run a few times, this shows whether they still run."/>
+        <text name="mm_ex_hiddenRuns" text="Seen while playing: the change from %s still runs."/>
+        <text name="mm_ex_lostSeen" text="%s changed this function, then %s put in its own version that doesn't pass the change on: the function ran %d times since loading, the change from %s not once."/>
+        <text name="mm_ex_lostEarlier" text="%s changed this function, then %s put in its own version that doesn't pass the change on (seen on an earlier load). The change from %s doesn't run."/>
         <text name="mm_ex_overwrite" text="%s wraps this function and decides whether the rest runs. If it skips the original, the changes below it (%s) don't run."/>
         <text name="mm_ex_blockFix" text="If something of the inner mod doesn't work, pick it as winner or raise it in the ranking."/>
         <text name="mm_ex_shared" text="Every change runs, in this order: %s. The last one has the last word."/>
@@ -111,7 +115,6 @@
         <text name="mm_ex_locked_load" text="Locked: this runs while loading. Changing it could stop the game from loading, so ModMux never does."/>
         <text name="mm_ex_locked_save" text="Locked: this saves your game. Changing it could lose data, so ModMux never does."/>
         <text name="mm_ex_locked_network" text="Locked: this keeps multiplayer in sync. Changing it on one side only would break that, so ModMux never does."/>
-        <text name="mm_ex_guessed" text="Part of this chain is a best guess (a mod keeps the old function in a way ModMux can only guess)."/>
         <text name="mm_ex_thisLoad" text="This load: %s (%s)"/>
         <text name="mm_ex_nextLoad" text="Next load: %s"/>
         <text name="mm_ex_category" text="Category: %s"/>
@@ -160,6 +163,7 @@
         <text name="mm_profile_defaultName" text="Profile %d"/>
         <text name="mm_info_hudScan" text="Close the menu and play on: for about 5 seconds ModMux notes where each mod draws. The result shows up here in REVIEW."/>
         <text name="mm_sub_conflicts" text="View: %s  |  %d conflicts: %d lost, %d may block, %d shared"/>
+        <text name="mm_sub_early" text="  |  %d mod(s) loaded before ModMux, not watched"/>
         <text name="mm_sub_live" text="%d settings, applied at once"/>
         <text name="mm_sub_vehicle" text="The vehicle you sit in, updated twice a second"/>
         <text name="mm_sub_perf" text="Frame %.1f ms (%d fps)  |  mods %.2f ms  |  budget %d fps = %.1f ms"/>
@@ -175,7 +179,8 @@
         <text name="mm_footer_safe_suspended" text="Levers are off: ModMux only watches. Turn them back on with the button."/>
         <text name="mm_footer_safeResumed" text="Levers are off for this load and come back on with the next one."/>
         <text name="mm_empty_conflicts" text="No conflicts: no two mods change the same function."/>
-        <text name="mm_empty_noDebug" text="This game build hides where functions come from, so ModMux can't read the hook chains."/>
+        <text name="mm_empty_noOwners" text="ModMux can't tell which mod a function comes from in this game version, so it can't find conflicts. The details are in modSettings/FS25_ModMux/ModMux.log."/>
+        <text name="mm_empty_conflictsEarly" text="No conflicts among the mods ModMux watched. %d mod(s) loaded before it and can't be watched: keep the zip named %s so it loads first."/>
         <text name="mm_empty_live" text="No live settings."/>
         <text name="mm_empty_vehicle" text="Get into a vehicle to see its numbers."/>
         <text name="mm_empty_perf" text="Measuring... numbers show after a few frames."/>

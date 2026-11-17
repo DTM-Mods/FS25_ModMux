@@ -4,6 +4,18 @@
 
 # Patch notes
 
+## 1.0.0.1
+
+- Works in the normal game. The game hides the debug functions from mods, so 1.0.0.0 couldn't tell which mod a function
+  came from and always found 0 conflicts. ModMux now reads the environment each mod's functions were written in
+  (`getfenv`) and watches every hook as it is made.
+- The zip is now **`FS25_0_ModMux.zip`**: the game loads mods in the order of their names, and ModMux has to load before
+  the mods it watches. Delete the old `FS25_ModMux.zip`. Settings stay in `modSettings/FS25_ModMux/`. Mods that still
+  load before it are named in the log, the report and the CONFLICTS tab.
+- A mod that puts in its own version of a function is a closed box. Hooks of other mods under it are now checked while
+  you play: once the function has run a few times, ModMux knows whether they still run or are lost. What it saw is kept
+  in `modSettings/FS25_ModMux/evidence.xml` for the next loads.
+
 ## 1.0.0.0
 
 First version.

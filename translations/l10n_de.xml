@@ -90,15 +90,19 @@
         <text name="mm_layer_append" text="hängt seinen Code hinter den Rest"/>
         <text name="mm_layer_prepend" text="setzt seinen Code vor den Rest"/>
         <text name="mm_layer_overwrite" text="umschließt den Rest und entscheidet, ob er läuft"/>
-        <text name="mm_layer_replaceFull" text="hat die Funktion komplett ersetzt"/>
-        <text name="mm_layer_replaceKeeps" text="hat die Funktion ersetzt, behält die alte (ruft sie vermutlich auf)"/>
-        <text name="mm_layer_replaceGuess" text="hat die Funktion ersetzt, scheint die alte zu behalten"/>
+        <text name="mm_layer_replace" text="hat eine eigene Version der Funktion eingesetzt"/>
         <text name="mm_layer_floor" text="das Original des Spiels"/>
+        <text name="mm_layer_hidden" text="DARIN, NOCH UNBEKANNT: %s (%s)"/>
+        <text name="mm_layer_hiddenRuns" text="darin, läuft noch: %s (%s)"/>
         <text name="mm_layer_lost" text="LÄUFT NICHT: %s (%s)"/>
         <text name="mm_ex_lost" text="%s hat diese Funktion geändert, aber %s hat sie danach ersetzt, ohne diese Änderung weiterzugeben. Die Änderung von %s läuft nie."/>
         <text name="mm_ex_lostLikely" text="%s hat diese Funktion geändert, dann hat %s eine eigene Version eingesetzt und die Änderung ist weg (ModMux hat die Änderung gesehen, nicht das Entfernen). Die Änderung von %s läuft sehr wahrscheinlich nie."/>
         <text name="mm_ex_lostFix" text="Wähle einen Gewinner oder schalte die gemeinsame Kette ein, damit beide Änderungen laufen (die verlorene kommt oben wieder drauf)."/>
-        <text name="mm_ex_replaced" text="%s hat eine eigene Version dieser Funktion eingesetzt. ModMux kann nicht sicher sagen, ob sie die Änderungen darunter von %s noch ausführt."/>
+        <text name="mm_ex_replaced" text="%s hat eine eigene Version dieser Funktion eingesetzt. Die Änderungen darunter von %s laufen nur, wenn diese Version sie weitergibt."/>
+        <text name="mm_ex_replacedWatch" text="ModMux findet es beim Spielen heraus: sobald die Funktion ein paar Mal gelaufen ist, steht hier, ob sie noch laufen."/>
+        <text name="mm_ex_hiddenRuns" text="Beim Spielen gesehen: die Änderung von %s läuft noch."/>
+        <text name="mm_ex_lostSeen" text="%s hat diese Funktion geändert, dann hat %s eine eigene Version eingesetzt, die die Änderung nicht weitergibt: die Funktion lief seit dem Laden %d Mal, die Änderung von %s kein einziges Mal."/>
+        <text name="mm_ex_lostEarlier" text="%s hat diese Funktion geändert, dann hat %s eine eigene Version eingesetzt, die die Änderung nicht weitergibt (bei einem früheren Start gesehen). Die Änderung von %s läuft nicht."/>
         <text name="mm_ex_overwrite" text="%s umschließt diese Funktion und entscheidet, ob der Rest läuft. Lässt es das Original aus, laufen die Änderungen darunter (%s) nicht."/>
         <text name="mm_ex_blockFix" text="Wenn etwas vom inneren Mod nicht funktioniert, wähle ihn als Gewinner oder setze ihn im Rang nach oben."/>
         <text name="mm_ex_shared" text="Jede Änderung läuft, in dieser Reihenfolge: %s. Die letzte hat das letzte Wort."/>
@@ -111,7 +115,6 @@
         <text name="mm_ex_locked_load" text="Gesperrt: das läuft beim Laden. Eine Änderung könnte das Laden verhindern, deshalb macht ModMux das nie."/>
         <text name="mm_ex_locked_save" text="Gesperrt: das speichert dein Spiel. Eine Änderung könnte Daten kosten, deshalb macht ModMux das nie."/>
         <text name="mm_ex_locked_network" text="Gesperrt: das hält den Mehrspieler synchron. Eine Änderung nur auf einer Seite würde das brechen, deshalb macht ModMux das nie."/>
-        <text name="mm_ex_guessed" text="Ein Teil dieser Kette ist geschätzt (ein Mod behält die alte Funktion auf eine Art, die ModMux nur schätzen kann)."/>
         <text name="mm_ex_thisLoad" text="Dieser Start: %s (%s)"/>
         <text name="mm_ex_nextLoad" text="Nächster Start: %s"/>
         <text name="mm_ex_category" text="Bereich: %s"/>
@@ -160,6 +163,7 @@
         <text name="mm_profile_defaultName" text="Profil %d"/>
         <text name="mm_info_hudScan" text="Schließe das Menü und spiele weiter: etwa 5 Sekunden lang notiert ModMux, wo jeder Mod zeichnet. Das Ergebnis erscheint hier unter PRÜFEN."/>
         <text name="mm_sub_conflicts" text="Ansicht: %s  |  %d Konflikte: %d verloren, %d evtl. blockiert, %d geteilt"/>
+        <text name="mm_sub_early" text="  |  %d Mod(s) vor ModMux geladen, nicht beobachtet"/>
         <text name="mm_sub_live" text="%d Einstellungen, gelten sofort"/>
         <text name="mm_sub_vehicle" text="Das Fahrzeug, in dem du sitzt, zweimal pro Sekunde aktualisiert"/>
         <text name="mm_sub_perf" text="Bild %.1f ms (%d fps)  |  Mods %.2f ms  |  Budget %d fps = %.1f ms"/>
@@ -175,7 +179,8 @@
         <text name="mm_footer_safe_suspended" text="Hebel sind aus: ModMux beobachtet nur. Schalte sie mit der Taste wieder ein."/>
         <text name="mm_footer_safeResumed" text="Die Hebel sind für diesen Start aus und ab dem nächsten wieder an."/>
         <text name="mm_empty_conflicts" text="Keine Konflikte: keine zwei Mods ändern dieselbe Funktion."/>
-        <text name="mm_empty_noDebug" text="Diese Spielversion verbirgt, woher Funktionen kommen, deshalb kann ModMux die Ketten nicht lesen."/>
+        <text name="mm_empty_noOwners" text="ModMux kann in dieser Spielversion nicht erkennen, von welchem Mod eine Funktion stammt, und findet deshalb keine Konflikte. Einzelheiten stehen in modSettings/FS25_ModMux/ModMux.log."/>
+        <text name="mm_empty_conflictsEarly" text="Keine Konflikte bei den Mods, die ModMux beobachtet hat. %d Mod(s) wurden davor geladen und können nicht beobachtet werden: lass die Zip-Datei %s heißen, damit sie zuerst lädt."/>
         <text name="mm_empty_live" text="Keine Live-Einstellungen."/>
         <text name="mm_empty_vehicle" text="Steig in ein Fahrzeug, um seine Werte zu sehen."/>
         <text name="mm_empty_perf" text="Messe... die Werte erscheinen nach ein paar Bildern."/>

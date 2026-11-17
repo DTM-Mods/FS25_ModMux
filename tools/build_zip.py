@@ -1,4 +1,4 @@
-"""Builds FS25_ModMux.zip from the shipped files only (forward-slash paths, modDesc at the root) and checks every entry
+"""Builds FS25_0_ModMux.zip from the shipped files only (forward-slash paths, modDesc at the root) and checks every entry
 against the source by SHA-256, plus GIANTS' limits (128 files, Lua files at most 0.5 MB).
 Usage: python -I tools/build_zip.py <out.zip>"""
 import hashlib

@@ -136,7 +136,9 @@ local function addHardConflicts(findings, conflicts)
     for _, conflict in ipairs(conflicts) do
         if conflict.kind == "lost" then
             for _, entry in ipairs(conflict.lost) do
-                for _, owner in ipairs(conflict.slot ~= nil and conflict.slot.mods or {}) do
+                -- the mod whose replacement blocks the change, when that is known; else every other mod in the chain
+                local owners = entry.replacer ~= nil and {entry.replacer} or (conflict.slot ~= nil and conflict.slot.mods or {})
+                for _, owner in ipairs(owners) do
                     if owner ~= entry.mod then
                         local id = "hard:" .. entry.mod .. ">" .. owner
                         if groups[id] == nil then

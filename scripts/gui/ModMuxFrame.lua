@@ -189,6 +189,8 @@ end
 
 function ModMuxFrame:onFrameOpen(element)
     ModMuxFrame:superClass().onFrameOpen(self)
+    -- what the probes saw since the last look
+    ModMux.guard("evidence", ModMux.checkEvidence)
     self:showTab(self.ui.tab)
 end
 

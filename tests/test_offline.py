@@ -1,9 +1,12 @@
 """Offline test of FS25_ModMux in the game's Lua version (5.1, through lupa) with a small fake game.
 
-The fake game has Utils with the real wrapper semantics, a few classes, a vehicle type, mod event listeners, and fake
-mods that load before and after ModMux and fight over functions the way real mods do (appended / overwritten /
-plain replacements, a change thrown away by a later mod, a change put on an object instead of the class). Several
-launches share one modSettings folder, so settings, the boot marker, safe mode and profiles carry over.
+The fake game works like the real one where ModMux depends on it: no debug library, every mod runs in its own
+environment table (registered under the mod's name in the global table, except one), the game's globals sit behind
+that environment's metatable __index, and g_currentModName names the mod only while its scripts load. It has Utils with
+the real wrapper semantics, a few classes, a vehicle type, mod event listeners, and fake mods that fight over functions
+the way real mods do (appended / overwritten / plain replacements that keep or drop the old function, a change put on
+an object instead of the class), one of them loading before ModMux. Several launches share one modSettings folder, so
+settings, the evidence, the boot marker, safe mode and profiles carry over.
 
 Usage: python tests/test_offline.py          (needs: pip install lupa)"""
 import os
@@ -264,6 +267,7 @@ Vehicle = {}
 function Vehicle.update(self, dt) call("game:update") end
 function Vehicle.draw(self) call("game:draw") end
 function Vehicle.getSpeedLimit(self) return 10 end
+function Vehicle.getFullName(self) call("game:name") end
 function Vehicle.saveToXMLFile(self) call("game:save") end
 HUD = {}
 function HUD.drawSpeed(self) call("game:drawSpeed") end
@@ -324,7 +328,14 @@ g_modManager = {getActiveMods = function(self) return MODS end,
     getModByName = function(self, name) for _, m in ipairs(MODS) do if m.modName == name then return m end end end}
 '''
 
+# loads before ModMux (its name sorts first): its Utils change can't be seen
 MODS_BEFORE = {
+    "ACM_EarlyBird": r'''
+Vehicle.getFullName = Utils.appendedFunction(Vehicle.getFullName, function(self) table.insert(CALLS, "early:name") end)
+''',
+}
+
+MODS_AFTER = {
     "FS25_AlphaWheels": r'''
 AlphaWheels = {}
 Vehicle.update = Utils.appendedFunction(Vehicle.update, function(self, dt) table.insert(CALLS, "alpha:update") end)
@@ -345,9 +356,6 @@ Vehicle.saveToXMLFile = function(self, ...)
     originalSave(self, ...)
 end
 ''',
-}
-
-MODS_AFTER = {
     "FS25_NovaPhysics": r'''
 NovaPhysics = {}
 Vehicle.update = Utils.appendedFunction(Vehicle.update, function(self, dt) table.insert(CALLS, "nova:update") end)
@@ -355,6 +363,7 @@ Vehicle.draw = Utils.appendedFunction(Vehicle.draw, function(self) table.insert(
 HUD.drawControlledEntityHUD = Utils.appendedFunction(HUD.drawControlledEntityHUD, function(self) table.insert(CALLS, "nova:hud") end)
 WheelPhysics.updateContact = Utils.prependedFunction(WheelPhysics.updateContact, function(self) table.insert(CALLS, "nova:contact") end)
 Vehicle.saveToXMLFile = Utils.appendedFunction(Vehicle.saveToXMLFile, function(self) end)
+Vehicle.getFullName = Utils.appendedFunction(Vehicle.getFullName, function(self) table.insert(CALLS, "nova:name") end)
 NovaSpec = {}
 function NovaSpec.getSpeedLimit(self, superFunc) return superFunc(self) * 2 end
 function NovaSpec.onUpdate(self, dt) end
@@ -404,13 +413,16 @@ addModEventListener(ZetaDrive)
     "FS25_ZetaDrive_v2": "",
 }
 
-TITLES = {"FS25_ZetaDrive": "Zeta Drive", "FS25_ZetaDrive_v2": "Zeta Drive"}
+TITLES = {"FS25_ZetaDrive": "Zeta Drive", "FS25_ZetaDrive_v2": "Zeta Drive", "ACM_EarlyBird": "Early Bird"}
+# a mod whose environment the game doesn't keep under its name: ModMux learns it while the mod loads
+UNREGISTERED = {"FS25_PiTools"}
+MODMUX = "FS25_0_ModMux"
 
 
 class Launch:
     """One start of the game: fresh Lua, the same modSettings folder."""
 
-    def __init__(self, farms=1):
+    def __init__(self, farms=1, modmux=MODMUX):
         self.engine = Engine()
         self.lua = lua51.LuaRuntime(unpack_returned_tuples=True)
         g = self.lua.globals()
@@ -426,30 +438,38 @@ class Launch:
         end''')
         self.run(UTILS, "@dataS/scripts/utils/Utils.lua")
         self.run(GAME, "@dataS/scripts/game.lua")
+        # the game hides the debug library from mods
+        self.lua.execute("debug = nil")
         if farms == 0:
             self.lua.execute("g_farmManager.farms = {}")
-        names = sorted(list(MODS_BEFORE) + ["FS25_ModMux"] + list(MODS_AFTER), key=str.lower)
+        names = sorted(list(MODS_BEFORE) + [modmux] + list(MODS_AFTER), key=str.lower)
         mods = []
         for name in names:
             mods.append({"modName": name, "title": TITLES.get(name, name[5:]), "modDir": f"C:/mods/{name}/",
                          "version": "1.0.0.0", "author": "Tester"})
         g.MODS = self.lua.table_from([self.lua.table_from(m) for m in mods])
-        self.make_env = self.lua.eval('''function(name)
-            local env = setmetatable({g_currentModName = name, g_currentModDirectory = "C:/mods/" .. name .. "/"}, {__index = _G})
-            rawset(_G, name, env)
+        # like the game: an environment per mod whose lookups fall through to the game's globals, and
+        # g_currentModName / g_currentModDirectory (game globals) only while the mod's scripts load
+        self.make_env = self.lua.eval('''function(name, register)
+            local env = setmetatable({}, {__index = _G})
+            if register then rawset(_G, name, env) end
             g_modIsLoaded[name] = true
+            g_currentModName = name
+            g_currentModDirectory = "C:/mods/" .. name .. "/"
             return env
         end''')
+        self.done_loading = self.lua.eval('''function() g_currentModName = nil g_currentModDirectory = nil end''')
         for name in names:
-            if name == "FS25_ModMux":
-                env = self.make_env(name)
+            env = self.make_env(name, name not in UNREGISTERED)
+            if name == modmux:
                 for rel in SCRIPTS:
                     src = open(os.path.join(PROJ, rel), encoding="utf-8").read()
-                    self.loader(src, f"@C:/mods/FS25_ModMux/{rel}", env)
+                    self.loader(src, f"@C:/mods/{modmux}/{rel}", env)
                 self.env = env
             else:
                 src = MODS_BEFORE.get(name, MODS_AFTER.get(name))
-                self.loader(src, f"@C:/mods/{name}/scripts/main.lua", self.make_env(name))
+                self.loader(src, f"@C:/mods/{name}/scripts/main.lua", env)
+            self.done_loading()
 
     def run(self, src, chunkname):
         return self.loader(src, chunkname, None)
@@ -493,6 +513,11 @@ class Launch:
     def conflict(self, cid):
         return self.env.ModMuxScan.conflictById[cid]
 
+    def play(self, code, times):
+        """runs game code a number of times, then lets ModMux read its probes"""
+        self.lua.execute(f"for i = 1, {times} do {code} end")
+        return self.env.ModMux.checkEvidence()
+
 
 def lua_quote(text):
     return "[==[" + text + "]==]"
@@ -516,30 +541,36 @@ def settings_path():
 # ---------------------------------------------------------------------------------------------------------------
 print("launch 1: detection")
 L = Launch()
-ModMux, Scan = L.env.ModMux, L.env.ModMuxScan
-check(Scan.calibrated, "Utils wrappers calibrated")
+ModMux, Scan, Origin = L.env.ModMux, L.env.ModMuxScan, L.env.ModMuxOrigin
+check(Origin.hasFenv, "function owners readable through getfenv")
+check(Origin.globalsVia == "game function", f"game globals found through a game function ({Origin.globalsVia})")
 check(Scan.installed, "hook recorder installed")
+check(L.lua.eval("FS25_0_ModMux") is not None and L.lua.eval("g_modMux") is not None, "g_modMux is in the game's globals")
 L.load_mission()
 ids = sorted(Scan.conflictById[k].id for k in Scan.conflictById)
 print("  conflicts:", ids)
+pi_env = Origin.modEnvs["FS25_PiTools"]
+check(Origin.learned >= 1 and pi_env is not None and Origin.ofFunction(pi_env.PiTools.loadMap) == "FS25_PiTools",
+      "an unregistered mod environment is learned while it loads")
+check(ModMux.loadPosition() == 2 and lua_list(ModMux.earlyMods()) == ["ACM_EarlyBird"], "one mod loads before ModMux")
+check(L.conflict("Vehicle.getFullName") is None, "the early mod's change can't be seen (looks like the game's)")
 
 c = L.conflict("Vehicle.update")
 check(c is not None and c.kind == "shared", "Vehicle.update is shared")
 check(c is not None and lua_list(c.mods) == ["FS25_AlphaWheels", "FS25_NovaPhysics"], "Vehicle.update mods in load order")
 
 c = L.conflict("Vehicle.draw")
-check(c is not None and c.kind == "lost", "Vehicle.draw: Nova's change is lost")
+check(c is not None and c.kind == "replaced", "Vehicle.draw: Nova's change hidden under Omega's replacement (may skip)")
 if c is not None:
-    lost = lua_list(c.lost)
-    check(len(lost) == 1 and lost[0].mod == "FS25_NovaPhysics" and lost[0].confirmed, "Vehicle.draw lost entry is Nova, confirmed")
+    hidden = lua_list(c.hidden)
+    check(len(hidden) == 1 and hidden[0].mod == "FS25_NovaPhysics" and hidden[0].replacer == "FS25_OmegaPlus"
+          and hidden[0].state == "hidden", "Vehicle.draw hidden entry is Nova, under Omega, not known yet")
     check(lua_list(c.slot.mods) == ["FS25_OmegaPlus"], "Vehicle.draw now holds only Omega")
 
 c = L.conflict("HUD.drawSpeed")
-check(c is not None and c.kind == "lost", "HUD.drawSpeed: Pi's change is lost")
+check(c is not None and c.kind == "replaced", "HUD.drawSpeed: Pi's change hidden under Zeta's replacement")
 if c is not None:
-    lost = lua_list(c.lost)
-    check([e.mod for e in lost] == ["FS25_PiTools"], "HUD.drawSpeed: only Pi lost, Nova's object hook not counted")
-    check(not lost[0].confirmed, "HUD.drawSpeed: Pi's loss is a likely one (never seen in a scan)")
+    check([e.mod for e in lua_list(c.hidden)] == ["FS25_PiTools"], "HUD.drawSpeed: only Pi, Nova's object hook not counted")
 
 c = L.conflict("HUD.drawControlledEntityHUD")
 check(c is not None and c.kind == "overwrite", "HUD.drawControlledEntityHUD may block (Omega wraps the others)")
@@ -550,16 +581,32 @@ c = L.conflict("Vehicle.saveToXMLFile")
 check(c is not None and c.locked and c.lockReason == "save", "Vehicle.saveToXMLFile is locked (save)")
 
 c = L.conflict("WheelPhysics.updateContact")
-check(c is not None and c.kind == "overwrite" and c.category == "wheels", "updateContact: Zeta's replacement keeps Nova's (may block)")
+check(c is not None and c.kind == "replaced" and c.category == "wheels", "updateContact: Nova's change hidden under Zeta's")
 if c is not None:
-    top = c.layers[1]
-    check(top.kind == "replace" and top.trusted, "Zeta's plain replacement keeps the old function (trusted)")
+    check(c.layers[1].kind == "replace" and c.floor is None, "Zeta's plain replacement is a closed box")
 
 types = [Scan.conflictById[k] for k in Scan.conflictById if Scan.conflictById[k].type == "types"]
 check(len(types) == 1 and types[0].key == "getSpeedLimit" and lua_list(types[0].types) == ["tractor"], "vehicle type chain found")
 
 check(L.calls("Vehicle.draw({})") == ["omega:draw"], "Vehicle.draw runs only Omega before any lever")
 check(L.calls("Vehicle.update({}, 16)") == ["game:update", "alpha:update", "nova:update"], "Vehicle.update natural order")
+check(L.calls("Vehicle.getFullName({})") == ["game:name", "early:name", "nova:name"], "probes don't change what runs")
+
+# playing: the probes tell whether the hidden changes still run
+check(not L.play("Vehicle.draw({})", 5), "a few runs are not enough for a verdict on a change that never ran")
+check(L.play("Vehicle.draw({}) HUD.drawSpeed({}) WheelPhysics.updateContact({})", 25), "verdicts after playing")
+c = L.conflict("Vehicle.draw")
+check(c.kind == "lost" and lua_list(c.lost)[0].mod == "FS25_NovaPhysics" and lua_list(c.lost)[0].calls >= 20,
+      "Vehicle.draw: Omega's version never passes Nova's change on (lost)")
+c = L.conflict("HUD.drawSpeed")
+check(c.kind == "lost" and lua_list(c.lost)[0].mod == "FS25_PiTools", "HUD.drawSpeed: Pi's change is lost")
+c = L.conflict("WheelPhysics.updateContact")
+check(c.kind == "overwrite" and lua_list(c.hidden)[0].state == "runs", "updateContact: Zeta's version still runs Nova's (may block)")
+check(Scan.conflicts[1].kind == "lost", "lost conflicts sorted first after the verdicts")
+evidence = os.path.join(PROFILE, "modSettings", "FS25_ModMux", "evidence.xml")
+check(os.path.exists(evidence) and open(evidence, encoding="utf-8").read().count("<item") == 3, "evidence.xml keeps the 3 verdicts")
+lines = lua_list(L.env.ModMuxTabs.explain(L.conflict("Vehicle.draw")))
+check(any("not once" in line for line in lines), f"explanation says the change never ran: {lines}")
 
 review = L.env.ModMuxReview
 fids = sorted(review.findings[i].id for i in range(1, len(review.findings) + 1))
@@ -611,6 +658,7 @@ L.lua.execute("for _, l in ipairs(g_modEventListeners) do if l.deleteMap then l:
 print("launch 2: levers")
 L = Launch()
 L.load_mission()
+check(L.conflict("Vehicle.draw").kind == "lost", "launch 2: Vehicle.draw lost from the evidence of launch 1")
 applied = L.env.ModMuxLevers.applied
 for cid in ["Vehicle.update", "Vehicle.draw", "HUD.drawSpeed", "HUD.drawControlledEntityHUD"]:
     a = applied[cid]
@@ -797,6 +845,16 @@ check(L7.env.ModMuxProfiles.indexOf("Round trip") is not None, "profiles kept on
 ok = L7.env.ModMux.guard("test step", L7.lua.eval("function() error('boom') end"))
 check(ok is False, "guard catches an error in ModMux's own work")
 check(any("test step" in L7.g.LOGS[i] for i in range(1, len(L7.g.LOGS) + 1)), "guard logs the error")
+
+# ---------------------------------------------------------------------------------------------------------------
+# Launch 8: the zip renamed back to FS25_ModMux: ModMux loads after some mods and says so
+# ---------------------------------------------------------------------------------------------------------------
+print("launch 8: loaded late")
+L8 = Launch(modmux="FS25_ModMux")
+L8.load_mission()
+check(L8.env.ModMux.loadPosition() == 4, "three mods load before FS25_ModMux")
+check(L8.conflict("HUD.drawControlledEntityHUD") is not None, "later mods are still watched")
+check("loaded before ModMux" in L8.env.ModMux.buildReport(), "report names the mods loaded before ModMux")
 
 check(not MISSING_TEXTS, f"texts used but missing in l10n: {sorted(MISSING_TEXTS)}")
 

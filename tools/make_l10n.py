@@ -110,12 +110,10 @@ T = [
     ("mm_layer_append", "adds its code after the rest", "hängt seinen Code hinter den Rest"),
     ("mm_layer_prepend", "adds its code before the rest", "setzt seinen Code vor den Rest"),
     ("mm_layer_overwrite", "wraps the rest and decides whether it runs", "umschließt den Rest und entscheidet, ob er läuft"),
-    ("mm_layer_replaceFull", "replaced the function completely", "hat die Funktion komplett ersetzt"),
-    ("mm_layer_replaceKeeps", "replaced the function, keeps the old one (probably calls it)",
-     "hat die Funktion ersetzt, behält die alte (ruft sie vermutlich auf)"),
-    ("mm_layer_replaceGuess", "replaced the function, seems to keep the old one",
-     "hat die Funktion ersetzt, scheint die alte zu behalten"),
+    ("mm_layer_replace", "put in its own version of the function", "hat eine eigene Version der Funktion eingesetzt"),
     ("mm_layer_floor", "the game's original", "das Original des Spiels"),
+    ("mm_layer_hidden", "INSIDE IT, NOT KNOWN YET: %s (%s)", "DARIN, NOCH UNBEKANNT: %s (%s)"),
+    ("mm_layer_hiddenRuns", "inside it, still runs: %s (%s)", "darin, läuft noch: %s (%s)"),
     ("mm_layer_lost", "NOT RUNNING: %s (%s)", "LÄUFT NICHT: %s (%s)"),
 
     # explanations
@@ -127,10 +125,22 @@ T = [
      "gesehen, nicht das Entfernen). Die Änderung von %s läuft sehr wahrscheinlich nie."),
     ("mm_ex_lostFix", "Pick a winner, or turn on the shared chain so both changes run (the lost one goes back on top).",
      "Wähle einen Gewinner oder schalte die gemeinsame Kette ein, damit beide Änderungen laufen (die verlorene kommt oben wieder drauf)."),
-    ("mm_ex_replaced", "%s put in its own version of this function. ModMux can't tell for sure whether it still runs the changes "
-     "below it from %s.",
-     "%s hat eine eigene Version dieser Funktion eingesetzt. ModMux kann nicht sicher sagen, ob sie die Änderungen darunter von %s "
-     "noch ausführt."),
+    ("mm_ex_replaced", "%s put in its own version of this function. The changes below it from %s only run if that version "
+     "passes them on.",
+     "%s hat eine eigene Version dieser Funktion eingesetzt. Die Änderungen darunter von %s laufen nur, wenn diese Version sie "
+     "weitergibt."),
+    ("mm_ex_replacedWatch", "ModMux finds out while you play: once the function has run a few times, this shows whether they still run.",
+     "ModMux findet es beim Spielen heraus: sobald die Funktion ein paar Mal gelaufen ist, steht hier, ob sie noch laufen."),
+    ("mm_ex_hiddenRuns", "Seen while playing: the change from %s still runs.",
+     "Beim Spielen gesehen: die Änderung von %s läuft noch."),
+    ("mm_ex_lostSeen", "%s changed this function, then %s put in its own version that doesn't pass the change on: the function ran "
+     "%d times since loading, the change from %s not once.",
+     "%s hat diese Funktion geändert, dann hat %s eine eigene Version eingesetzt, die die Änderung nicht weitergibt: die Funktion "
+     "lief seit dem Laden %d Mal, die Änderung von %s kein einziges Mal."),
+    ("mm_ex_lostEarlier", "%s changed this function, then %s put in its own version that doesn't pass the change on (seen on an "
+     "earlier load). The change from %s doesn't run.",
+     "%s hat diese Funktion geändert, dann hat %s eine eigene Version eingesetzt, die die Änderung nicht weitergibt (bei einem "
+     "früheren Start gesehen). Die Änderung von %s läuft nicht."),
     ("mm_ex_overwrite", "%s wraps this function and decides whether the rest runs. If it skips the original, the changes below it (%s) don't run.",
      "%s umschließt diese Funktion und entscheidet, ob der Rest läuft. Lässt es das Original aus, laufen die Änderungen darunter (%s) nicht."),
     ("mm_ex_blockFix", "If something of the inner mod doesn't work, pick it as winner or raise it in the ranking.",
@@ -153,8 +163,6 @@ T = [
      "Gesperrt: das speichert dein Spiel. Eine Änderung könnte Daten kosten, deshalb macht ModMux das nie."),
     ("mm_ex_locked_network", "Locked: this keeps multiplayer in sync. Changing it on one side only would break that, so ModMux never does.",
      "Gesperrt: das hält den Mehrspieler synchron. Eine Änderung nur auf einer Seite würde das brechen, deshalb macht ModMux das nie."),
-    ("mm_ex_guessed", "Part of this chain is a best guess (a mod keeps the old function in a way ModMux can only guess).",
-     "Ein Teil dieser Kette ist geschätzt (ein Mod behält die alte Funktion auf eine Art, die ModMux nur schätzen kann)."),
     ("mm_ex_thisLoad", "This load: %s (%s)", "Dieser Start: %s (%s)"),
     ("mm_ex_nextLoad", "Next load: %s", "Nächster Start: %s"),
     ("mm_ex_category", "Category: %s", "Bereich: %s"),
@@ -224,6 +232,7 @@ T = [
     # sub headers, footers, empty lists
     ("mm_sub_conflicts", "View: %s  |  %d conflicts: %d lost, %d may block, %d shared",
      "Ansicht: %s  |  %d Konflikte: %d verloren, %d evtl. blockiert, %d geteilt"),
+    ("mm_sub_early", "  |  %d mod(s) loaded before ModMux, not watched", "  |  %d Mod(s) vor ModMux geladen, nicht beobachtet"),
     ("mm_sub_live", "%d settings, applied at once", "%d Einstellungen, gelten sofort"),
     ("mm_sub_vehicle", "The vehicle you sit in, updated twice a second", "Das Fahrzeug, in dem du sitzt, zweimal pro Sekunde aktualisiert"),
     ("mm_sub_perf", "Frame %.1f ms (%d fps)  |  mods %.2f ms  |  budget %d fps = %.1f ms",
@@ -252,8 +261,14 @@ T = [
      "Die Hebel sind für diesen Start aus und ab dem nächsten wieder an."),
     ("mm_empty_conflicts", "No conflicts: no two mods change the same function.",
      "Keine Konflikte: keine zwei Mods ändern dieselbe Funktion."),
-    ("mm_empty_noDebug", "This game build hides where functions come from, so ModMux can't read the hook chains.",
-     "Diese Spielversion verbirgt, woher Funktionen kommen, deshalb kann ModMux die Ketten nicht lesen."),
+    ("mm_empty_noOwners", "ModMux can't tell which mod a function comes from in this game version, so it can't find conflicts. "
+     "The details are in modSettings/FS25_ModMux/ModMux.log.",
+     "ModMux kann in dieser Spielversion nicht erkennen, von welchem Mod eine Funktion stammt, und findet deshalb keine Konflikte. "
+     "Einzelheiten stehen in modSettings/FS25_ModMux/ModMux.log."),
+    ("mm_empty_conflictsEarly", "No conflicts among the mods ModMux watched. %d mod(s) loaded before it and can't be watched: "
+     "keep the zip named %s so it loads first.",
+     "Keine Konflikte bei den Mods, die ModMux beobachtet hat. %d Mod(s) wurden davor geladen und können nicht beobachtet werden: "
+     "lass die Zip-Datei %s heißen, damit sie zuerst lädt."),
     ("mm_empty_live", "No live settings.", "Keine Live-Einstellungen."),
     ("mm_empty_vehicle", "Get into a vehicle to see its numbers.", "Steig in ein Fahrzeug, um seine Werte zu sehen."),
     ("mm_empty_perf", "Measuring... numbers show after a few frames.", "Messe... die Werte erscheinen nach ein paar Bildern."),

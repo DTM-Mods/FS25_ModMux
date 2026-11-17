@@ -49,10 +49,9 @@ end
 
 local OWNER_FUNCTIONS = {"update", "draw", "updateTick", "loadMap", "deleteMap", "mouseEvent", "keyEvent"}
 
-local function ownerOf(listener, source)
-    local owner = source ~= nil and ModMuxOrigin.ofSource(source) or nil
-    if ModMuxOrigin.isMod(owner) then
-        return owner
+local function ownerOf(listener, mod)
+    if ModMuxOrigin.isMod(mod) then
+        return mod
     end
     for _, name in ipairs(OWNER_FUNCTIONS) do
         local f = rawget(listener, name)
@@ -88,7 +87,7 @@ function ModMuxPerf.findListeners()
         table.insert(byMod[owner], {listener = listener, parkable = parkable})
     end
     for _, record in ipairs(ModMuxScan.listenerRecords) do
-        add(record.listener, ownerOf(record.listener, record.source), true)
+        add(record.listener, ownerOf(record.listener, record.mod), true)
     end
     local list = rawget(G, "g_modEventListeners")
     if type(list) == "table" then
@@ -98,17 +97,14 @@ function ModMuxPerf.findListeners()
             end
         end
     end
-    if type(g_modIsLoaded) == "table" then
-        for modName in pairs(g_modIsLoaded) do
-            local env = rawget(G, modName)
-            if type(env) == "table" and env ~= G then
-                for _, value in pairs(env) do
-                    if type(value) == "table" and not seen[value] and hasPerFrame(value)
-                        and (type(rawget(value, "loadMap")) == "function" or type(rawget(value, "deleteMap")) == "function") then
-                        local owner = ownerOf(value)
-                        if owner == modName then
-                            add(value, owner, type(rawget(value, "loadMap")) == "function" and rawget(value, "new") == nil)
-                        end
+    for modName, env in pairs(ModMuxOrigin.modEnvs) do
+        if type(env) == "table" and env ~= G then
+            for _, value in pairs(env) do
+                if type(value) == "table" and not seen[value] and hasPerFrame(value)
+                    and (type(rawget(value, "loadMap")) == "function" or type(rawget(value, "deleteMap")) == "function") then
+                    local owner = ownerOf(value)
+                    if owner == modName then
+                        add(value, owner, type(rawget(value, "loadMap")) == "function" and rawget(value, "new") == nil)
                     end
                 end
             end

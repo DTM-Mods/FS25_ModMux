@@ -64,6 +64,17 @@ Three views show the same data at different depths: **SIMPLE** (the ranking), **
 Each load also writes a plain-text summary to `modSettings/FS25_ModMux/ModMux.log`, and if mods cut each other off you
 get a notification shortly after the game starts.
 
+### How does it know?
+
+ModMux watches every change to a game function as it is made, so it has to load before the mods it watches. The game
+loads mods in the order of their names, which is why the zip is called `FS25_0_ModMux.zip`: keep that name. A mod
+whose name sorts even earlier (one that doesn't start with `FS25_`) can't be watched; the CONFLICTS page and the log say
+which ones.
+
+Some mods don't hook into a function but put in their own version of it. Whether that version still runs what other
+mods hooked in underneath can't be seen from the outside, so ModMux finds out while you play: once the function has run
+a few times, the conflict shows whether those changes still run or are lost. It remembers that for the next starts.
+
 ### What if something goes wrong?
 
 - **Can ModMux break my game mid-session?** No. It only rewires things while a savegame loads, based on what you set
@@ -76,7 +87,7 @@ get a notification shortly after the game starts.
 - **What if a savegame comes up with its farms missing?** Then saving is refused for that session, so the damaged state
   never replaces the savegame on disk, and the following start has all ModMux changes switched off.
 - **What does it write, and where?** Only into `modSettings/FS25_ModMux/`: its settings, the profiles, a small start
-  marker and the summary file. It never connects to the internet.
+  marker, what it saw while playing (`evidence.xml`) and the summary file. It never connects to the internet.
 
 ### Multiplayer and dedicated servers
 
@@ -104,9 +115,10 @@ DEV = '''<p align="center">
   <img src="https://raw.githubusercontent.com/DTM-Mods/.github/main/assets/installation.jpg" alt="Installation" width="100%">
 </p>
 
-Download `FS25_ModMux.zip` from the [latest release](https://github.com/DTM-Mods/FS25_ModMux/releases/latest) and put it in
-`Documents/My Games/FarmingSimulator2025/mods`, without unzipping or renaming it. In multiplayer the server and every
-player need the same zip.
+Download `FS25_0_ModMux.zip` from the [latest release](https://github.com/DTM-Mods/FS25_ModMux/releases/latest) and put it
+in `Documents/My Games/FarmingSimulator2025/mods`, without unzipping or renaming it: the `0` makes it load before your
+other mods. If you had version 1.0.0.0 (`FS25_ModMux.zip`), delete that one. In multiplayer the server and every player
+need the same zip.
 
 See [PATCH_NOTES.md](PATCH_NOTES.md) for what changed in each version.
 
@@ -114,14 +126,22 @@ See [PATCH_NOTES.md](PATCH_NOTES.md) for what changed in each version.
 <summary><b>For developers</b></summary>
 
 How it works: a mod changes a game function with `Utils.appendedFunction` / `prependedFunction` / `overwrittenFunction`
-(a wrapper that keeps the old function as an upvalue) or by plainly assigning its own function. ModMux reads those
-chains from the outside with `debug.getinfo` (which file, so which mod) and `debug.getupvalue` (the old function inside
-a wrapper). It calibrates itself at start by wrapping two dummy functions, so it doesn't depend on the game's code.
-From its own load on it records every `Utils.*Function` call, which also catches changes a later mod threw away.
+(a wrapper around the old function) or by plainly assigning its own function. The game hides the `debug` library from
+mods, so nothing can look inside a function. Instead:
 
-- `scripts/ModMuxOrigin.lua`: which mod a function belongs to.
-- `scripts/ModMuxScan.lua`: calibration, the hook recorder, scans of every class (the game's and each mod's), chain
-  parsing, lost changes, conflicts, vehicle / placeable type chains, categories.
+- Which mod: the game runs every script mod in its own environment table, and each function keeps the environment it
+  was written in, so `getfenv(f)` names its mod. The game's own functions have the game's global table (found through
+  `getfenv` of a game function; a mod's own environment only holds its globals and looks the rest up via `__index`).
+- The chains: ModMux loads first (`FS25_0_ModMux.zip`) and replaces the Utils helpers with a recorder, so every hook is
+  recorded with its old function, its new function and the wrapper. A scan follows the recorded wrappers down to the
+  game's original. Hooks made by mods that load earlier can't be seen.
+- Plain replacements are closed boxes. The recorder hands each mod's function on inside a tiny probe that notes when it
+  runs; during play, a counter on each function with hooks hidden under a replacement tells after 20 runs whether they
+  still run or are blocked. Verdicts are kept in `modSettings/FS25_ModMux/evidence.xml`.
+
+- `scripts/ModMuxOrigin.lua`: which mod a function belongs to, the game's global table, mod environments.
+- `scripts/ModMuxScan.lua`: the hook recorder and its probes, scans of every class (the game's and each mod's), chain
+  parsing, lost and hidden changes, conflicts, vehicle / placeable type chains, the evidence while playing, categories.
 - `scripts/ModMuxLevers.lua`: locks, plans (winner, shared chain, rank / category order) and rebuilding a chain with the
   game's own Utils helpers.
 - `scripts/ModMuxPerf.lua`: per-mod timers, parking, the HUD overlap scan.
@@ -132,10 +152,10 @@ From its own load on it records every `Utils.*Function` call, which also catches
 - `config/knownIncompatible.xml`: shipped incompatible pairs (empty: only pairs confirmed in game belong there).
 - Generated: `tools/make_l10n.py` (translations), `tools/make_gui.py` (page layout), `tools/make_textures.py`
   (textures; the mod icon from `_brand/tools/make_icons.py <brand> <work> --modhub modMux`), `tools/make_readme.py`.
-- Test: `python tests/test_offline.py` runs everything in the game's Lua 5.1 (`pip install lupa`) with a fake game and
-  fake mods fighting over functions, through several starts (levers, safe mode, kill switch, abnormal load, every
-  Switchboard button).
-- Build: `python -I tools/build_zip.py dist/FS25_ModMux.zip`.
+- Test: `python tests/test_offline.py` runs everything in the game's Lua 5.1 (`pip install lupa`) with a fake game that
+  works like the real one (no `debug`, an environment per mod) and fake mods fighting over functions, through several
+  starts (levers, evidence, safe mode, kill switch, abnormal load, every Switchboard button, loaded late).
+- Build: `python -I tools/build_zip.py dist/FS25_0_ModMux.zip`.
 
 </details>
 

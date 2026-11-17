@@ -96,25 +96,22 @@ function ModMuxTabs.planShort(conflict, plan)
 end
 
 local function layerText(layer)
-    if layer.kind == "replace" then
-        if layer.super == nil then
-            return t("mm_layer_replaceFull")
-        elseif layer.trusted then
-            return t("mm_layer_replaceKeeps")
-        end
-        return t("mm_layer_replaceGuess")
-    end
     return t("mm_layer_" .. layer.kind)
 end
 
---- the chain, outermost (runs first / last word) first
-function ModMuxTabs.chainLines(layers, floor, lost)
+--- the chain, outermost (runs first / last word) first; then what sits hidden inside a plain replacement, then what
+-- doesn't run at all
+function ModMuxTabs.chainLines(layers, floor, lost, hidden)
     local lines = {t("mm_chain_head")}
     for i, layer in ipairs(layers) do
         table.insert(lines, string.format("%d. %s: %s", i, ModMuxOrigin.title(layer.owner), layerText(layer)))
     end
     if floor ~= nil then
         table.insert(lines, string.format("%d. %s", #layers + 1, t("mm_layer_floor")))
+    end
+    for _, entry in ipairs(hidden or {}) do
+        table.insert(lines, t(entry.state == "runs" and "mm_layer_hiddenRuns" or "mm_layer_hidden", ModMuxOrigin.title(entry.mod),
+            t("mm_layer_" .. entry.kind)))
     end
     for _, entry in ipairs(lost or {}) do
         table.insert(lines, t("mm_layer_lost", ModMuxOrigin.title(entry.mod), t("mm_layer_" .. entry.kind)))
@@ -148,19 +145,28 @@ function ModMuxTabs.explain(conflict)
     local slotMods = conflict.slot.mods
     if conflict.kind == "lost" then
         for _, entry in ipairs(conflict.lost) do
-            local others = {}
-            for _, owner in ipairs(slotMods) do
-                if owner ~= entry.mod then
-                    table.insert(others, owner)
+            local mod = ModMuxOrigin.title(entry.mod)
+            if entry.replacer ~= nil then
+                local who = ModMuxOrigin.title(entry.replacer)
+                if entry.calls ~= nil and entry.calls > 0 then
+                    table.insert(lines, t("mm_ex_lostSeen", mod, who, entry.calls, mod))
+                else
+                    table.insert(lines, t("mm_ex_lostEarlier", mod, who, mod))
                 end
+            else
+                local others = {}
+                for _, owner in ipairs(slotMods) do
+                    if owner ~= entry.mod then
+                        table.insert(others, owner)
+                    end
+                end
+                local who = #others > 0 and ModMuxTabs.modList(others, 3) or t("mm_owner_unknown")
+                table.insert(lines, t(entry.confirmed and "mm_ex_lost" or "mm_ex_lostLikely", mod, who, mod))
             end
-            local who = #others > 0 and ModMuxTabs.modList(others, 3) or t("mm_owner_unknown")
-            table.insert(lines, t(entry.confirmed and "mm_ex_lost" or "mm_ex_lostLikely", ModMuxOrigin.title(entry.mod), who,
-                ModMuxOrigin.title(entry.mod)))
         end
         table.insert(lines, t("mm_ex_lostFix"))
     elseif conflict.kind == "replaced" or conflict.kind == "overwrite" then
-        -- the outermost mod that sits on top of another mod's change
+        -- the outermost mod that sits on top of another mod's change; the hidden changes sit under the innermost layer
         local outer, below = nil, {}
         for i, layer in ipairs(conflict.layers) do
             if ModMuxOrigin.isMod(layer.owner) and (layer.kind == "overwrite" or layer.kind == "replace") then
@@ -168,6 +174,11 @@ function ModMuxTabs.explain(conflict)
                     local other = conflict.layers[j].owner
                     if ModMuxOrigin.isMod(other) and other ~= layer.owner and indexOf(below, other) == nil then
                         table.insert(below, other)
+                    end
+                end
+                for _, entry in ipairs(conflict.hidden or {}) do
+                    if entry.mod ~= layer.owner and indexOf(below, entry.mod) == nil then
+                        table.insert(below, entry.mod)
                     end
                 end
                 if #below > 0 then
@@ -178,6 +189,14 @@ function ModMuxTabs.explain(conflict)
         end
         if outer ~= nil then
             table.insert(lines, t("mm_ex_" .. conflict.kind, ModMuxOrigin.title(outer), ModMuxTabs.modList(below, 3)))
+        end
+        if conflict.kind == "replaced" then
+            table.insert(lines, t("mm_ex_replacedWatch"))
+        end
+        for _, entry in ipairs(conflict.hidden or {}) do
+            if entry.state == "runs" then
+                table.insert(lines, t("mm_ex_hiddenRuns", ModMuxOrigin.title(entry.mod)))
+            end
         end
         table.insert(lines, t("mm_ex_blockFix"))
     else
@@ -197,9 +216,6 @@ function ModMuxTabs.explain(conflict)
     end
     if conflict.locked then
         table.insert(lines, t("mm_ex_locked_" .. tostring(conflict.lockReason)))
-    end
-    if conflict.slot.guessed then
-        table.insert(lines, t("mm_ex_guessed"))
     end
     return lines
 end
@@ -471,7 +487,7 @@ function ModMuxTabs.advancedModel(ui)
         table.insert(detail, "")
         local chain = conflict.after or conflict.layers
         for _, line in ipairs(ModMuxTabs.chainLines(chain, conflict.after == nil and conflict.floor or nil,
-            conflict.after == nil and conflict.lost or nil)) do
+            conflict.after == nil and conflict.lost or nil, conflict.after == nil and conflict.hidden or nil)) do
             table.insert(detail, line)
         end
         table.insert(detail, "")
@@ -532,6 +548,10 @@ function ModMuxTabs.conflictsModel(ui)
         counts[conflict.severity] = counts[conflict.severity] + 1
     end
     model.subHeader = t("mm_sub_conflicts", t(ModMuxTabs.VIEW_KEYS[ui.view]), #ModMuxScan.conflicts, counts[3], counts[2], counts[1])
+    local early = #ModMux.earlyMods()
+    if early > 0 then
+        model.subHeader = model.subHeader .. t("mm_sub_early", early)
+    end
     model.globalActions = {action("view", "mm_act_view", 6, function()
         ui.view = ui.view % 3 + 1
     end, t(ModMuxTabs.VIEW_KEYS[ui.view % 3 + 1]))}
@@ -550,8 +570,10 @@ function ModMuxTabs.conflictsModel(ui)
             end}
         end))
     end
-    if not ModMuxScan.calibrated then
-        model.emptyText = t("mm_empty_noDebug")
+    if not ModMuxOrigin.hasFenv then
+        model.emptyText = t("mm_empty_noOwners")
+    elseif early > 0 and #ModMuxScan.conflicts == 0 then
+        model.emptyText = t("mm_empty_conflictsEarly", early, ModMux.ZIP_NAME .. ".zip")
     end
     return model
 end

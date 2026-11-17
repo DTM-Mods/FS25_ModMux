@@ -8,18 +8,25 @@
 --   Mission00 finished       last scan, conflicts, then the levers of this load are applied, parking, timers, the page
 --   ~10 s of play            the boot marker says "ok" (a load that never gets here starts the next one in safe mode)
 --
--- Files, all in modSettings/FS25_ModMux/: settings.xml, profiles.xml, boot.xml, ModMux.log and the player's optional
--- knownIncompatible.xml and MODMUX_SAFE_MODE.txt. Nothing else is written anywhere, nothing goes over the network.
+-- Files, all in modSettings/FS25_ModMux/ (that name, whatever the zip is called): settings.xml, profiles.xml, boot.xml,
+-- evidence.xml (what ModMux saw while playing), ModMux.log and the player's optional knownIncompatible.xml and
+-- MODMUX_SAFE_MODE.txt. Nothing else is written anywhere, nothing goes over the network.
+--
+-- ModMux must load before the mods it watches: the game loads mods in the order of their names, so the zip is named
+-- FS25_0_ModMux.zip. Changes made by a mod that loaded earlier can't be seen.
 
 ModMux = {}
 
-ModMux.MOD_NAME = g_currentModName or "FS25_ModMux"
+ModMux.MOD_NAME = ModMuxOrigin.OWN_NAME
+ModMux.ZIP_NAME = "FS25_0_ModMux"
+ModMux.SETTINGS_FOLDER = "FS25_ModMux"
 ModMux.MOD_DIR = g_currentModDirectory or ""
 ModMux.TAG = "[ModMux]"
 ModMux.KILL_FILE = "MODMUX_SAFE_MODE.txt"
 ModMux.RECOVERY_MS = 10000
 ModMux.WARNING_DELAY_MS = 8000
 ModMux.AUTO_HUD_SCAN_MS = 60000
+ModMux.EVIDENCE_INTERVAL_MS = 5000
 ModMux.HUD_SCAN_FRAMES = 300
 
 ModMux.safeMode = false
@@ -28,6 +35,7 @@ ModMux.killSwitch = false
 ModMux.blockSaves = false
 ModMux.missionLoaded = false
 ModMux.runMs = 0
+ModMux.missionAt = nil             -- getTimeSec() when the mission had loaded
 ModMux.bootState = nil
 ModMux.pendingWarning = false
 ModMux.autoHudDone = false
@@ -35,6 +43,7 @@ ModMux.settingsDir = ""
 ModMux.missionReady = false        -- the mission has loaded; ModMux's own work follows on its first update
 ModMux.errors = {}                 -- steps of ModMux's own work that stopped with an error (see ModMux.guard)
 ModMux.frameBroken = false
+ModMux.evidenceMs = 0
 
 local G = ModMuxScan.G
 
@@ -61,9 +70,6 @@ function ModMux.guard(label, f, ...)
     local ok, err = coroutine.resume(co, ...)
     if not ok then
         Logging.error("%s %s stopped with an error, ModMux carries on without it: %s", ModMux.TAG, label, tostring(err))
-        if debug ~= nil and debug.traceback ~= nil then
-            print(debug.traceback(co))
-        end
         table.insert(ModMux.errors, label)
         return false
     end
@@ -473,7 +479,7 @@ end
 function ModMux.boot()
     local profile = getUserProfileAppPath()
     createFolder(profile .. "modSettings/")
-    ModMux.settingsDir = profile .. "modSettings/" .. ModMux.MOD_NAME .. "/"
+    ModMux.settingsDir = profile .. "modSettings/" .. ModMux.SETTINGS_FOLDER .. "/"
     createFolder(ModMux.settingsDir)
 
     ModMux.settings = ModMux.loadSettings()
@@ -496,7 +502,7 @@ function ModMux.boot()
     ModMux.applied.perfProbes = ModMux.settings.options.perfProbes
 
     ModMuxOrigin.refreshMods()
-    ModMuxScan.calibrated = ModMuxScan.calibrate()
+    ModMuxScan.loadVerdicts(ModMux.evidencePath())
     if not ModMux.killSwitch then
         ModMuxScan.install()
         ModMux.installSaveGuard()
@@ -526,21 +532,40 @@ function ModMux.boot()
     ModMux.guard("first scan", ModMuxScan.scan, "boot")
 
     local mode = ModMux.safeMode and ("SAFE MODE (" .. tostring(ModMux.safeReason) .. ")") or "levers on"
-    print(string.format("%s %s loaded at position %d of %d mods, %s, hook recorder %s, chain reading %s", ModMux.TAG,
+    print(string.format("%s %s loaded at position %d of %d mods, %s, hook recorder %s, %s", ModMux.TAG,
         ModMux.getVersion(), ModMux.loadPosition(), #ModMuxOrigin.mods, mode, ModMuxScan.installed and "on" or "off",
-        ModMuxScan.calibrated and "on" or "OFF (the game hides function details)"))
+        ModMuxOrigin.describe()))
+    if ModMux.loadPosition() > 1 then
+        print(string.format("%s %s", ModMux.TAG, ModMux.earlyText()))
+    end
 end
 
---- how many mods loaded before ModMux (+1): they can't be watched live, only read from what they left behind
-function ModMux.loadPosition()
-    local position = 1
+function ModMux.evidencePath()
+    return ModMux.settingsDir .. "evidence.xml"
+end
+
+--- the mods that load before ModMux (the game goes by name). Their Utils changes can't be seen.
+function ModMux.earlyMods()
+    local list = {}
     local own = ModMux.MOD_NAME:lower()
     for _, mod in ipairs(ModMuxOrigin.mods) do
         if not mod.isDLC and mod.name:lower() < own then
-            position = position + 1
+            table.insert(list, mod.name)
         end
     end
-    return position
+    return list
+end
+
+function ModMux.earlyText()
+    local early = ModMux.earlyMods()
+    local names = table.concat(early, ", ", 1, math.min(#early, 5)) .. (#early > 5 and string.format(" +%d", #early - 5) or "")
+    return string.format("%d mod(s) loaded before ModMux (%s): changes they made with Utils can't be seen. ModMux loads first "
+        .. "when its zip is named %s.zip.", #early, names, ModMux.ZIP_NAME)
+end
+
+--- ModMux's place in the load order (1 = first)
+function ModMux.loadPosition()
+    return #ModMux.earlyMods() + 1
 end
 
 ModMuxLate = {}
@@ -559,6 +584,8 @@ function ModMux.onAllLoadMaps()
 end
 
 function ModMux:loadMap(filename)
+    -- every mod's scripts are loaded: whoever changes a function from now on does it from a callback
+    ModMuxScan.loading = false
     if not ModMux.lateRegistered then
         ModMux.lateRegistered = true
         addModEventListener(ModMuxLate)
@@ -608,6 +635,10 @@ function ModMux.onMissionLoaded()
             ModMuxPerf.install()
         end
         ModMux.refreshAppliedChains()
+    end
+    -- watching works in safe mode too: it only counts
+    if not ModMux.killSwitch then
+        ModMuxScan.startEvidence()
     end
 
     ModMuxReview.loadKnownPairs({ModMux.MOD_DIR .. "config/knownIncompatible.xml", ModMux.settingsDir .. "knownIncompatible.xml"})
@@ -683,6 +714,7 @@ end
 function ModMux:update(dt)
     if ModMux.missionReady and not ModMux.missionLoaded then
         ModMux.missionLoaded = true
+        ModMux.missionAt = getTimeSec ~= nil and getTimeSec() or nil
         ModMux.guard("mission", ModMux.onMissionLoaded)
     end
     -- a frame that stopped with an error leaves frameBroken set: the numbers stop instead of the log filling up
@@ -695,7 +727,14 @@ function ModMux:update(dt)
         return
     end
     ModMux.runMs = ModMux.runMs + (dt or 0)
-    if ModMux.bootState == "loading" and ModMux.runMs >= ModMux.RECOVERY_MS then
+    ModMux.evidenceMs = ModMux.evidenceMs + (dt or 0)
+    if ModMux.evidenceMs >= ModMux.EVIDENCE_INTERVAL_MS then
+        ModMux.evidenceMs = 0
+        ModMux.guard("evidence", ModMux.checkEvidence)
+    end
+    -- 10 s of play, counted in real time too: time in menus adds no dt
+    local realMs = (getTimeSec ~= nil and ModMux.missionAt ~= nil) and (getTimeSec() - ModMux.missionAt) * 1000 or 0
+    if ModMux.bootState == "loading" and (ModMux.runMs >= ModMux.RECOVERY_MS or realMs >= ModMux.RECOVERY_MS) then
         ModMux.writeBoot("ok")
     end
     if ModMux.pendingWarning and ModMux.runMs >= ModMux.WARNING_DELAY_MS then
@@ -711,8 +750,12 @@ function ModMux:update(dt)
 end
 
 function ModMux:deleteMap()
-    if ModMux.bootState == "loading" and ModMux.runMs > 2000 then
+    -- leaving a loaded game normally means this start worked, however short it was
+    if ModMux.bootState == "loading" and ModMux.missionLoaded then
         ModMux.writeBoot("ok")
+    end
+    if ModMux.missionLoaded then
+        ModMux.checkEvidence()
     end
     ModMuxPerf.stopHudScan()
     removeConsoleCommand("modMux")
@@ -767,6 +810,24 @@ function ModMux.showStartWarning()
     end
 end
 
+--- Reads what the probes saw while playing (every few seconds, when the page opens and at the end). A change hidden
+-- under a plain replacement is now known to run, or to be blocked (lost). Returns true when something changed.
+function ModMux.checkEvidence()
+    if not ModMux.missionLoaded then
+        return false
+    end
+    local changed = ModMuxScan.updateEvidence()
+    if changed then
+        ModMuxReview.build(ModMuxScan.conflicts)
+        ModMux.writeReport()
+        ModMux.onReviewChanged()
+    end
+    if ModMuxScan.verdictsChanged and ModMux.settingsDir ~= "" then
+        ModMuxScan.saveVerdicts(ModMux.evidencePath())
+    end
+    return changed
+end
+
 function ModMux.onReviewChanged()
     if ModMuxFrame.instance ~= nil and ModMuxFrame.instance.onDataChanged ~= nil then
         ModMuxFrame.instance:onDataChanged()
@@ -797,16 +858,18 @@ function ModMux.buildReport()
         end
     end
     add("ModMux %s report, %s", ModMux.getVersion(), ModMux.getDate())
-    add("Mods: %d active, ModMux loaded as number %d (mods before it are read from what they left behind)",
-        #ModMuxOrigin.mods, ModMux.loadPosition())
+    add("Mods: %d active, ModMux loaded as number %d", #ModMuxOrigin.mods, ModMux.loadPosition())
+    if ModMux.loadPosition() > 1 then
+        add("%s", ModMux.earlyText())
+    end
     if ModMux.safeMode then
         add("SAFE MODE: %s. No conflict was rewired, nothing parked, no timers.", tostring(ModMux.safeReason))
     end
     if ModMux.blockSaves then
         add("SAVES BLOCKED: this savegame had farms and loaded with none.")
     end
-    add("Hook recorder: %s, chain reading: %s, hooks recorded: %d (by mods: %d)", ModMuxScan.installed and "on" or "off",
-        ModMuxScan.calibrated and "on" or "off", #ModMuxScan.records, #(ModMuxScan.modRecords or {}))
+    add("Hook recorder: %s, hooks recorded: %d (by mods: %d), %s", ModMuxScan.installed and "on" or "off",
+        #ModMuxScan.records, #(ModMuxScan.modRecords or {}), ModMuxOrigin.describe())
     for _, scan in ipairs(ModMuxScan.scanLog) do
         add("Scan %-14s %6d functions, %4d changed by mods, %.0f ms", scan.label, scan.functions, scan.hooked, scan.ms)
     end
@@ -853,7 +916,7 @@ function ModMux.logSummary()
     end
     print(string.format("%s %d conflicts (%d serious, %d may block, %d shared), %d rewired this load, %d mods parked, " ..
         "report in modSettings/%s/ModMux.log", ModMux.TAG, #ModMuxScan.conflicts, bySeverity[3], bySeverity[2], bySeverity[1],
-        ModMuxLevers.appliedCount, #sortedKeys(ModMuxPerf.parked), ModMux.MOD_NAME))
+        ModMuxLevers.appliedCount, #sortedKeys(ModMuxPerf.parked), ModMux.SETTINGS_FOLDER))
     for _, conflict in ipairs(ModMuxScan.conflicts) do
         if conflict.kind == "lost" then
             print(string.format("%s   lost changes in %s: %s", ModMux.TAG, conflict.id, ModMuxTabs.modList(conflict.mods, 6)))

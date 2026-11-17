@@ -1,29 +1,32 @@
 -- ModMux: finds the functions several mods change, and what became of each change.
 --
 -- How a mod changes a game function: `Vehicle.update = Utils.appendedFunction(Vehicle.update, myUpdate)` (or prepended /
--- overwritten), which builds a small wrapper that keeps the old function, or a plain `Vehicle.update = function ...` that
--- may or may not call the old one. The wrappers keep the old function as an upvalue, so the whole chain can be walked
--- from the outside: wrapper -> mod function + older wrapper -> ... -> the game's original.
+-- overwritten), which builds a small wrapper around the old function, or a plain `Vehicle.update = function ...` that may
+-- or may not call the old one. The game hides what is inside a function, so ModMux watches the changes being made:
 --
--- 1. calibrate(): wraps two dummy functions with each Utils helper to learn where the old / new function sit in the
---    wrapper's upvalues and how such a wrapper looks (file:line), so nothing depends on the game's private code.
--- 2. install(): from ModMux's load on, every Utils.*Function call is recorded with the mod that made it. That also
---    catches a change that was made and then thrown away by a later mod: the silent breakage this mod is about.
--- 3. scan(): walks every class table (and every mod's own classes) and parses each changed function into layers.
+-- 1. install(): ModMux loads first (its zip name sorts first) and puts a recorder around the Utils helpers. Every
+--    change made after that is recorded: the old function, the mod's function, the wrapper, and the mod (the
+--    environment the mod's function was written in). The mod's function is handed on inside a tiny probe that notes
+--    when it runs. Changes made by mods that loaded before ModMux can't be seen.
+-- 2. scan(): walks every class table (and every mod's own classes) and takes each changed function apart into its
+--    layers, as far as the recorded wrappers go. A plain replacement is a closed box: what is under it is unknown.
 --    Runs at ModMux's load, at its loadMap, after every mod's loadMap and when the mission has loaded.
--- 4. analyze(): lost changes, conflicts (two or more mods on one function), vehicle / placeable type chains.
+-- 3. analyze(): lost changes, changes hidden under a plain replacement, conflicts (two or more mods on one function),
+--    vehicle / placeable type chains.
+-- 4. While playing: for a change hidden under a plain replacement, ModMux counts how often the function runs. Once it
+--    has run a few times, the probe tells whether the change still runs ("runs") or never does ("blocked", lost). The
+--    verdict is kept for the next loads (evidence.xml), so the levers can act on it.
 
 ModMuxScan = {}
 
-local G = (getfenv ~= nil and getfenv(0)) or _G
+local G = ModMuxOrigin.G
 ModMuxScan.G = G
 
 ModMuxScan.UTILS_NAMES = {append = "appendedFunction", prepend = "prependedFunction", overwrite = "overwrittenFunction"}
 ModMuxScan.KINDS = {"append", "prepend", "overwrite"}
 
-ModMuxScan.kinds = {}               -- wrapper signature -> {kind, oldIndex, newIndex}
 ModMuxScan.original = {}            -- kind -> the Utils helper as it was before the recorder
-ModMuxScan.records = {}             -- every recorded hook made by a mod
+ModMuxScan.records = {}             -- every recorded change
 ModMuxScan.recordByWrapper = {}
 ModMuxScan.transparent = setmetatable({}, {__mode = "k"})  -- ModMux's own wrappers -> the function inside
 ModMuxScan.history = {}             -- function -> slot id it was seen in (first one)
@@ -37,12 +40,17 @@ ModMuxScan.generation = 0           -- number of scans done; records remember th
 ModMuxScan.scanLog = {}             -- {label, functions, hooked, ms}
 ModMuxScan.conflicts = {}
 ModMuxScan.conflictById = {}
-ModMuxScan.listenerRecords = {}     -- addModEventListener calls seen: {listener, source}
+ModMuxScan.listenerRecords = {}     -- addModEventListener calls seen: {listener, mod}
 ModMuxScan.installed = false
+ModMuxScan.loading = true           -- mods are still loading their scripts (until ModMux's loadMap)
+
+ModMuxScan.verdicts = {}            -- verdict key -> "runs" | "blocked" (this load and earlier ones, evidence.xml)
+ModMuxScan.verdictsChanged = false
+ModMuxScan.EVIDENCE_CALLS = 20      -- runs of a function before a hidden change that never ran counts as blocked
 
 ModMuxScan.SEVERITY = {lost = 3, replaced = 2, overwrite = 2, shared = 1, types = 1}
 
-local GAME, ENGINE = ModMuxOrigin.GAME, ModMuxOrigin.ENGINE
+local GAME = ModMuxOrigin.GAME
 
 local function clock()
     if getTimeSec ~= nil then
@@ -51,70 +59,52 @@ local function clock()
     return os.clock()
 end
 
-local function signatureOf(f)
-    local info = ModMuxOrigin.info(f)
-    return info ~= nil and info.signature or "?"
+local function isMod(owner)
+    return ModMuxOrigin.isMod(owner)
 end
 
 ----------------------------------------------------------------------------------------------------------------
--- Calibration and the recorder
+-- The recorder
 ----------------------------------------------------------------------------------------------------------------
 
-function ModMuxScan.calibrate()
-    if Utils == nil or not ModMuxOrigin.hasUpvalues then
-        return false
-    end
-    local function probeOld() end
-    local function probeNew() end
-    local found = 0
-    for _, kind in ipairs(ModMuxScan.KINDS) do
-        local helper = Utils[ModMuxScan.UTILS_NAMES[kind]]
-        if type(helper) == "function" then
-            ModMuxScan.original[kind] = helper
-            local wrapper = helper(probeOld, probeNew)
-            if type(wrapper) == "function" and wrapper ~= probeOld and wrapper ~= probeNew then
-                local oldIndex, newIndex = nil, nil
-                for i = 1, 30 do
-                    local name, value = debug.getupvalue(wrapper, i)
-                    if name == nil then
-                        break
-                    end
-                    if value == probeOld then
-                        oldIndex = i
-                    elseif value == probeNew then
-                        newIndex = i
-                    end
+local function makeRecorder(kind, helper)
+    local own = ModMuxOrigin.ownEnv
+    return function(oldFunc, newFunc)
+        if type(oldFunc) ~= "function" or type(newFunc) ~= "function" then
+            return helper(oldFunc, newFunc)
+        end
+        local env = ModMuxOrigin.envOf(newFunc)
+        local loadingMod = ModMuxScan.loading and ModMuxOrigin.loadingMod() or nil
+        local record = {kind = kind, old = oldFunc, new = newFunc, env = env, loadingMod = loadingMod,
+            generation = ModMuxScan.generation, ran = false}
+        local passed = newFunc
+        if ModMuxOrigin.hasFenv and env ~= G and env ~= own then
+            -- a mod's change: noted once it runs (one extra call, nothing else)
+            passed = function(...)
+                if not record.ran then
+                    record.ran = true
                 end
-                if oldIndex ~= nil and newIndex ~= nil then
-                    ModMuxScan.kinds[signatureOf(wrapper)] = {kind = kind, oldIndex = oldIndex, newIndex = newIndex}
-                    found = found + 1
-                end
+                return newFunc(...)
             end
         end
+        local wrapper = helper(oldFunc, passed)
+        if type(wrapper) == "function" and wrapper ~= passed then
+            record.wrapper = wrapper
+            record.seq = #ModMuxScan.records + 1
+            table.insert(ModMuxScan.records, record)
+            ModMuxScan.recordByWrapper[wrapper] = record
+            if loadingMod ~= nil then
+                ModMuxOrigin.learnEnv(env, loadingMod)
+            end
+        end
+        return wrapper
     end
-    return found == #ModMuxScan.KINDS
 end
 
---- the file a function was called from (level 1 = the function asking)
-local function callerSource(level)
-    if not ModMuxOrigin.hasDebug then
-        return nil
-    end
-    local info = debug.getinfo(level + 1, "S")
-    return info ~= nil and info.source or nil
-end
+local LISTENER_FUNCTIONS = {"loadMap", "update", "draw", "updateTick", "deleteMap", "mouseEvent", "keyEvent"}
 
-function ModMuxScan.onHook(kind, oldFunc, newFunc, wrapper, source)
-    if type(newFunc) ~= "function" or type(oldFunc) ~= "function" or type(wrapper) ~= "function" or wrapper == newFunc then
-        return
-    end
-    local record = {seq = #ModMuxScan.records + 1, kind = kind, old = oldFunc, new = newFunc, wrapper = wrapper,
-        callerSource = source, generation = ModMuxScan.generation}
-    table.insert(ModMuxScan.records, record)
-    ModMuxScan.recordByWrapper[wrapper] = record
-end
-
---- Puts the recorder around the Utils helpers and addModEventListener. Idempotent.
+--- Puts the recorder around the Utils helpers and addModEventListener (in the game's global table, where every mod
+-- finds them). Idempotent.
 function ModMuxScan.install()
     if ModMuxScan.installed or Utils == nil then
         return
@@ -122,14 +112,10 @@ function ModMuxScan.install()
     ModMuxScan.installed = true
     for _, kind in ipairs(ModMuxScan.KINDS) do
         local name = ModMuxScan.UTILS_NAMES[kind]
-        local helper = ModMuxScan.original[kind] or Utils[name]
+        local helper = Utils[name]
         if type(helper) == "function" then
             ModMuxScan.original[kind] = helper
-            local recorder = function(oldFunc, newFunc)
-                local wrapper = helper(oldFunc, newFunc)
-                ModMuxScan.onHook(kind, oldFunc, newFunc, wrapper, callerSource(2))
-                return wrapper
-            end
+            local recorder = makeRecorder(kind, helper)
             ModMuxScan.transparent[recorder] = helper
             Utils[name] = recorder
         end
@@ -139,7 +125,13 @@ function ModMuxScan.install()
     if type(addListener) == "function" then
         local recorder = function(listener, ...)
             if type(listener) == "table" then
-                table.insert(ModMuxScan.listenerRecords, {listener = listener, source = callerSource(2)})
+                local mod = ModMuxScan.loading and ModMuxOrigin.loadingMod() or nil
+                table.insert(ModMuxScan.listenerRecords, {listener = listener, mod = mod})
+                if mod ~= nil then
+                    for _, name in ipairs(LISTENER_FUNCTIONS) do
+                        ModMuxOrigin.learnEnv(ModMuxOrigin.envOf(rawget(listener, name)), mod)
+                    end
+                end
             end
             return addListener(listener, ...)
         end
@@ -148,23 +140,19 @@ function ModMuxScan.install()
     end
 end
 
---- Resolves which mod made each record (after the mod list is complete). Records of the game itself are dropped.
+--- Which mod made each record (after the mod list is complete). Records of the game itself stay known for parsing.
 function ModMuxScan.resolveRecords()
     local kept = {}
     ModMuxScan.recordByWrapper = {}
     for _, record in ipairs(ModMuxScan.records) do
-        local owner = ModMuxOrigin.ofFunction(record.new)
-        local caller = ModMuxOrigin.ofSource(record.callerSource)
-        if not ModMuxOrigin.isMod(owner) and ModMuxOrigin.isMod(caller) then
-            owner = caller
+        local owner = ModMuxOrigin.ofEnv(record.env)
+        if owner == ModMuxOrigin.UNKNOWN and isMod(record.loadingMod) then
+            owner = record.loadingMod
         end
-        -- vehicle type chains (SpecializationUtil) are built by the game with the mods' functions: not a class change
-        record.viaGame = caller == GAME
         record.mod = owner
-        if ModMuxOrigin.isMod(owner) and owner ~= ModMux.MOD_NAME then
+        if isMod(owner) and owner ~= ModMuxOrigin.OWN_NAME then
             table.insert(kept, record)
         end
-        -- every wrapper stays known for parsing, the game's too
         ModMuxScan.recordByWrapper[record.wrapper] = record
     end
     ModMuxScan.modRecords = kept
@@ -191,27 +179,6 @@ function ModMuxScan.remember(f, id)
     end
 end
 
-function ModMuxScan.historyHas(f, id)
-    if ModMuxScan.history[f] == id then
-        return true
-    end
-    local alias = ModMuxScan.historyAlias[f]
-    return alias ~= nil and alias[id] == true
-end
-
---- true when `f` was this slot's value (or part of its chain) at some point, directly or as the base of a recorded hook
-function ModMuxScan.belongsTo(f, id, depth)
-    depth = depth or 0
-    if f == nil or id == nil or depth > 30 then
-        return false
-    end
-    if ModMuxScan.historyHas(f, id) then
-        return true
-    end
-    local record = ModMuxScan.recordByWrapper[f]
-    return record ~= nil and ModMuxScan.belongsTo(record.old, id, depth + 1)
-end
-
 --- the one slot a function belongs to, or nil when unknown / ambiguous
 function ModMuxScan.targetOf(f, depth)
     depth = depth or 0
@@ -233,108 +200,65 @@ function ModMuxScan.targetOf(f, depth)
 end
 
 ----------------------------------------------------------------------------------------------------------------
--- Parsing one function into layers
+-- Taking one function apart into layers
 ----------------------------------------------------------------------------------------------------------------
 
-local function isSuperName(name)
-    if type(name) ~= "string" then
-        return false
-    end
-    local n = name:lower()
-    return n:find("super") ~= nil or n:find("orig") ~= nil or n:find("^old") ~= nil or n:find("^prev") ~= nil
-        or n:find("^base") ~= nil or n:find("vanilla") ~= nil or n:find("default") ~= nil
-end
-
---- The function a plain replacement keeps and (probably) calls: an upvalue that was this slot's value before.
--- Returns super, trusted. A name like "superFunc" / "origUpdate" alone is only a guess (trusted = false).
-function ModMuxScan.findSuper(f, id)
-    if not ModMuxOrigin.hasUpvalues then
-        return nil, false
-    end
-    local guess = nil
-    for i = 1, 60 do
-        local name, value = debug.getupvalue(f, i)
-        if name == nil then
-            break
-        end
-        if type(value) == "function" and value ~= f then
-            if id ~= nil and ModMuxScan.belongsTo(value, id) then
-                return value, true
-            end
-            if guess == nil and isSuperName(name) then
-                guess = value
-            end
-        end
-    end
-    return guess, false
-end
-
---- Layers of a function, outermost first, and the game function at the bottom (floor; nil when a mod replaced it).
--- layer = {kind = append|prepend|overwrite|replace, fn, wrapper, owner, record, super, trusted}
+--- Layers of a function, outermost first, and the game's function at the bottom (floor). The walk follows the recorded
+-- wrappers; it stops at a plain replacement by a mod (a closed box: kind "replace", the last layer, floor nil).
+-- layer = {kind = append|prepend|overwrite|replace, fn, wrapper, owner, record}
 function ModMuxScan.parse(f, id, containerMod)
-    local layers, floor, guessed = {}, nil, false
+    local layers, floor = {}, nil
     local guard = 0
-    while type(f) == "function" and guard < 80 do
+    while type(f) == "function" and guard < 200 do
         guard = guard + 1
         local inner = ModMuxScan.transparent[f]
         if inner ~= nil then
             f = inner
         else
             local record = ModMuxScan.recordByWrapper[f]
-            local kind, old, new = nil, nil, nil
             if record ~= nil then
-                kind, old, new = record.kind, record.old, record.new
-            elseif ModMuxOrigin.hasUpvalues then
-                local k = ModMuxScan.kinds[signatureOf(f)]
-                if k ~= nil then
-                    local _, o = debug.getupvalue(f, k.oldIndex)
-                    local _, n = debug.getupvalue(f, k.newIndex)
-                    kind, old, new = k.kind, o, n
+                local owner = record.mod or ModMuxOrigin.ofFunction(record.new)
+                if owner ~= ModMuxOrigin.OWN_NAME then
+                    table.insert(layers, {kind = record.kind, fn = record.new, wrapper = f, owner = owner, record = record})
                 end
-            end
-            if kind ~= nil then
-                local owner = (record ~= nil and record.mod) or ModMuxOrigin.ofFunction(new)
-                if owner ~= ModMux.MOD_NAME then
-                    table.insert(layers, {kind = kind, fn = new, wrapper = f, owner = owner, record = record})
-                end
-                f = old
+                f = record.old
             else
                 local owner = ModMuxOrigin.ofFunction(f)
-                if owner == GAME or owner == ENGINE or (containerMod ~= nil and owner == containerMod) then
+                if not isMod(owner) or owner == containerMod or owner == ModMuxOrigin.OWN_NAME then
                     floor = f
-                    break
+                else
+                    table.insert(layers, {kind = "replace", fn = f, wrapper = f, owner = owner})
                 end
-                local super, trusted = ModMuxScan.findSuper(f, id)
-                table.insert(layers, {kind = "replace", fn = f, wrapper = f, owner = owner, super = super, trusted = trusted})
-                if super == nil then
-                    break
-                end
-                if not trusted then
-                    guessed = true
-                end
-                f = super
+                break
             end
         end
     end
-    return layers, floor, guessed
+    return layers, floor
 end
 
---- true when a chain (parsed from `value`) still holds one of the given functions
-function ModMuxScan.chainHolds(value, id, containerMod, a, b, c)
+--- Whether a chain (parsed from `value`) still holds one of the given functions, whether it ends in a closed plain
+-- replacement, and whose. Returns holds, opaque, replacer.
+function ModMuxScan.chainState(value, id, containerMod, a, b, c)
     if value == nil then
-        return false
+        return false, false, nil
     end
     if value == a or value == b or value == c then
-        return true
+        return true, false, nil
     end
     local layers, floor = ModMuxScan.parse(value, id, containerMod)
     for _, layer in ipairs(layers) do
-        if layer.wrapper == a or layer.wrapper == b or layer.wrapper == c or layer.fn == a or layer.fn == b or layer.fn == c
-            or (layer.super ~= nil and (layer.super == a or layer.super == b or layer.super == c)) then
-            return true
+        if layer.wrapper == a or layer.wrapper == b or layer.wrapper == c or layer.fn == a or layer.fn == b or layer.fn == c then
+            return true, false, nil
         end
     end
-    return floor ~= nil and (floor == a or floor == b or floor == c)
+    if floor ~= nil then
+        return floor == a or floor == b or floor == c, false, nil
+    end
+    local last = layers[#layers]
+    if last ~= nil and last.kind == "replace" then
+        return false, true, last.owner
+    end
+    return false, false, nil
 end
 
 --- distinct mod owners of a layer list, innermost (loaded first) first; ModMux and the game left out
@@ -342,7 +266,7 @@ function ModMuxScan.modsOf(layers)
     local mods, seen = {}, {}
     for i = #layers, 1, -1 do
         local owner = layers[i].owner
-        if ModMuxOrigin.isMod(owner) and owner ~= ModMux.MOD_NAME and not seen[owner] then
+        if isMod(owner) and owner ~= ModMuxOrigin.OWN_NAME and not seen[owner] then
             seen[owner] = true
             table.insert(mods, owner)
         end
@@ -361,25 +285,20 @@ end
 --- callback(containerName, table, containerMod) for every class table of the game and of every mod
 function ModMuxScan.eachContainer(callback)
     local envs = {}
-    if type(g_modIsLoaded) == "table" then
-        for modName in pairs(g_modIsLoaded) do
-            local env = rawget(G, modName)
-            if type(env) == "table" and env ~= G then
-                envs[modName] = env
-            end
-        end
+    for modName, env in pairs(ModMuxOrigin.modEnvs) do
+        envs[env] = modName
     end
     for name, value in pairs(G) do
-        if type(name) == "string" and type(value) == "table" and envs[name] == nil and name:find("^%u") ~= nil
+        if type(name) == "string" and type(value) == "table" and envs[value] == nil and name:find("^%u") ~= nil
             and not isSkippedContainer(name) then
             callback(name, value, nil)
         end
     end
-    for modName, env in pairs(envs) do
-        if modName ~= ModMux.MOD_NAME then
+    for env, modName in pairs(envs) do
+        if modName ~= ModMuxOrigin.OWN_NAME then
             for name, value in pairs(env) do
                 if type(name) == "string" and type(value) == "table" and name:find("^%u") ~= nil and rawget(G, name) ~= value
-                    and not isSkippedContainer(name) then
+                    and envs[value] == nil and not isSkippedContainer(name) then
                     callback(modName .. "/" .. name, value, modName)
                 end
             end
@@ -403,9 +322,9 @@ end
 
 ModMuxScan.gameContainers = setmetatable({}, {__mode = "k"})  -- tables that held a game function in any scan
 
---- The mod a global table belongs to when it is a mod's own class put into the global table: it never held a game
--- function (in any scan) and most of its own functions were written by one mod. Its own functions are then its base,
--- not changes. A game class whose functions a mod replaced is never one of these.
+--- The mod a global table belongs to when it is a mod's own class put into the game's global table: it never held a
+-- game function (in any scan) and most of its own functions were written by one mod. Its own functions are then its
+-- base, not changes. A game class whose functions a mod replaced is never one of these.
 local function dominantOwner(tbl)
     if ModMuxScan.gameContainers[tbl] then
         return nil
@@ -413,29 +332,28 @@ local function dominantOwner(tbl)
     local counts, total = {}, 0
     for _, value in pairs(tbl) do
         if type(value) == "function" then
-            local info = ModMuxOrigin.info(value)
-            if info.owner == GAME or info.owner == ENGINE then
+            local owner = ModMuxOrigin.ofFunction(value)
+            if owner == GAME then
                 ModMuxScan.gameContainers[tbl] = true
                 return nil
             end
-            if ModMuxScan.kinds[info.signature] == nil and ModMuxScan.recordByWrapper[value] == nil
-                and ModMuxScan.transparent[value] == nil then
-                counts[info.owner] = (counts[info.owner] or 0) + 1
+            if ModMuxScan.recordByWrapper[value] == nil and ModMuxScan.transparent[value] == nil then
+                counts[owner] = (counts[owner] or 0) + 1
                 total = total + 1
             end
         end
     end
     for owner, count in pairs(counts) do
-        if ModMuxOrigin.isMod(owner) and count * 2 > total then
+        if isMod(owner) and count * 2 > total then
             return owner
         end
     end
     return nil
 end
 
-local function makeSlot(id, container, key, tbl, containerMod, value, layers, floor, guessed)
+local function makeSlot(id, container, key, tbl, containerMod, value, layers, floor)
     return {id = id, container = container, key = key, table = tbl, containerMod = containerMod, value = value,
-        layers = layers, floor = floor, guessed = guessed, mods = ModMuxScan.modsOf(layers)}
+        layers = layers, floor = floor, mods = ModMuxScan.modsOf(layers)}
 end
 
 function ModMuxScan.scan(label)
@@ -443,7 +361,8 @@ function ModMuxScan.scan(label)
     ModMuxScan.generation = ModMuxScan.generation + 1
     local slots, containers, visited = {}, {}, {}
     local functions, hooked = 0, 0
-    local kinds, recordByWrapper, transparent = ModMuxScan.kinds, ModMuxScan.recordByWrapper, ModMuxScan.transparent
+    local recordByWrapper, transparent = ModMuxScan.recordByWrapper, ModMuxScan.transparent
+    local own = ModMuxOrigin.OWN_NAME
 
     ModMuxScan.eachContainer(function(name, tbl, containerMod)
         if visited[tbl] then
@@ -459,12 +378,13 @@ function ModMuxScan.scan(label)
                 functions = functions + 1
                 local id = name .. "." .. key
                 ModMuxScan.remember(value, id)
-                local info = ModMuxOrigin.info(value)
-                local owner = info.owner
-                local touched = kinds[info.signature] ~= nil or recordByWrapper[value] ~= nil or transparent[value] ~= nil
-                    or (owner ~= GAME and owner ~= ENGINE and owner ~= containerMod)
+                local touched = recordByWrapper[value] ~= nil or transparent[value] ~= nil
+                if not touched then
+                    local owner = ModMuxOrigin.ofFunction(value)
+                    touched = isMod(owner) and owner ~= containerMod and owner ~= own
+                end
                 if touched then
-                    local layers, floor, guessed = ModMuxScan.parse(value, id, containerMod)
+                    local layers, floor = ModMuxScan.parse(value, id, containerMod)
                     for _, layer in ipairs(layers) do
                         ModMuxScan.remember(layer.wrapper, id)
                         ModMuxScan.remember(layer.fn, id)
@@ -478,7 +398,7 @@ function ModMuxScan.scan(label)
                             ModMuxScan.bestFloor[id] = floor
                         end
                     end
-                    local slot = makeSlot(id, name, key, tbl, containerMod, value, layers, floor, guessed)
+                    local slot = makeSlot(id, name, key, tbl, containerMod, value, layers, floor)
                     if #slot.mods > 0 then
                         slots[id] = slot
                         hooked = hooked + 1
@@ -531,16 +451,23 @@ function ModMuxScan.scanObjects()
 end
 
 ----------------------------------------------------------------------------------------------------------------
--- Lost changes and conflicts
+-- Lost and hidden changes, conflicts
 ----------------------------------------------------------------------------------------------------------------
 
---- Changes a mod made with Utils.*Function that are no longer in the function they were made for.
+function ModMuxScan.verdictKey(id, entry)
+    return string.format("%s|%s|%s|%s", id, tostring(entry.mod), tostring(entry.kind), tostring(entry.replacer))
+end
+
+--- Changes a mod made with Utils.*Function that are no longer visible in the function they were made for:
+--   lost[id]    the chain is open all the way down and the change isn't in it (state "lost")
+--   hidden[id]  a mod's plain replacement sits on top: the change may still run inside it. State "hidden" until the
+--               function has run a few times ("runs" or, as "lost", blocked); a verdict from an earlier load counts.
 -- Seen in a scan and gone since: sure. Never seen (made and replaced between two scans): only when the slot no longer
 -- holds the function the change was built on either, so a change put on an object instead of the class doesn't count.
 function ModMuxScan.findLost()
-    local lost = {}
+    local lost, hidden = {}, {}
     for _, record in ipairs(ModMuxScan.modRecords or {}) do
-        if not record.viaGame and not ModMuxScan.elsewhere[record.wrapper] then
+        if not record.inTypes and not ModMuxScan.elsewhere[record.wrapper] then
             local id = ModMuxScan.seenIn[record.wrapper]
             local confirmed = id ~= nil
             if id == nil and record.generation < ModMuxScan.lateGeneration then
@@ -552,31 +479,47 @@ function ModMuxScan.findLost()
             end
             if tbl ~= nil then
                 local value = rawget(tbl, key)
-                local holds
+                local holds, opaque, replacer
                 if confirmed then
-                    holds = ModMuxScan.chainHolds(value, id, containerMod, record.wrapper, record.new)
+                    holds, opaque, replacer = ModMuxScan.chainState(value, id, containerMod, record.wrapper, record.new)
                 else
-                    holds = ModMuxScan.chainHolds(value, id, containerMod, record.wrapper, record.new, record.old)
+                    holds, opaque, replacer = ModMuxScan.chainState(value, id, containerMod, record.wrapper, record.new, record.old)
                 end
                 if not holds then
-                    lost[id] = lost[id] or {}
-                    table.insert(lost[id], {record = record, mod = record.mod, kind = record.kind, fn = record.new,
-                        confirmed = confirmed})
+                    local entry = {record = record, mod = record.mod, kind = record.kind, fn = record.new, confirmed = confirmed}
+                    if opaque then
+                        entry.replacer = replacer
+                        entry.key = ModMuxScan.verdictKey(id, entry)
+                        entry.verdict = ModMuxScan.verdicts[entry.key]
+                        entry.state = (entry.verdict == "blocked" and "lost") or (entry.verdict == "runs" and "runs") or "hidden"
+                        hidden[id] = hidden[id] or {}
+                        table.insert(hidden[id], entry)
+                    else
+                        entry.state = "lost"
+                        lost[id] = lost[id] or {}
+                        table.insert(lost[id], entry)
+                    end
                 end
             end
         end
     end
-    return lost
+    return lost, hidden
 end
 
---- What kind of fight a slot is (see ModMuxScan.SEVERITY), from its layers outermost first.
-function ModMuxScan.classify(layers, lostList)
+--- What kind of fight a slot is (see ModMuxScan.SEVERITY), from its layers outermost first and its lost / hidden
+-- changes (hidden ones sit under the innermost layer, a plain replacement).
+function ModMuxScan.classify(layers, lostList, hiddenList)
     if lostList ~= nil and #lostList > 0 then
         return "lost"
     end
-    local seenBelow = {}
-    -- walk from the inside out; remember which mods sit below each layer
-    local below = {}
+    local below, unknown = {}, false
+    for _, entry in ipairs(hiddenList or {}) do
+        below[entry.mod] = true
+        if entry.state == "hidden" then
+            unknown = true
+        end
+    end
+    local result = "shared"
     for i = #layers, 1, -1 do
         local layer = layers[i]
         local othersBelow = false
@@ -586,33 +529,51 @@ function ModMuxScan.classify(layers, lostList)
                 break
             end
         end
-        if othersBelow and ModMuxOrigin.isMod(layer.owner) then
-            if layer.kind == "replace" and not layer.trusted then
-                seenBelow.replaced = true
-            elseif layer.kind == "overwrite" or layer.kind == "replace" then
-                seenBelow.overwrite = true
+        if othersBelow and isMod(layer.owner) then
+            if layer.kind == "replace" then
+                if unknown then
+                    return "replaced"
+                end
+                result = "overwrite"
+            elseif layer.kind == "overwrite" then
+                result = "overwrite"
             end
         end
-        if ModMuxOrigin.isMod(layer.owner) then
+        if isMod(layer.owner) then
             below[layer.owner] = true
         end
     end
-    if seenBelow.replaced then
-        return "replaced"
-    elseif seenBelow.overwrite then
-        return "overwrite"
+    return result
+end
+
+--- Sorts a conflict's changes into lost / hidden by their state, then its kind and severity.
+function ModMuxScan.reshape(conflict)
+    local lost, hidden = {}, {}
+    for _, entry in ipairs(conflict.entries) do
+        if entry.state == "lost" then
+            table.insert(lost, entry)
+        else
+            table.insert(hidden, entry)
+        end
     end
-    return "shared"
-end
-
-local function addConflict(conflicts, conflict)
+    conflict.lost, conflict.hidden = lost, hidden
+    conflict.kind = ModMuxScan.classify(conflict.layers, lost, hidden)
     conflict.severity = ModMuxScan.SEVERITY[conflict.kind] or 1
-    table.insert(conflicts, conflict)
 end
 
---- All conflicts: class functions (with lost changes) and vehicle / placeable type function chains.
+local function sortConflicts(conflicts)
+    table.sort(conflicts, function(a, b)
+        if a.severity ~= b.severity then
+            return a.severity > b.severity
+        end
+        return a.id < b.id
+    end)
+end
+
+--- All conflicts: class functions (with lost and hidden changes) and vehicle / placeable type function chains.
 function ModMuxScan.analyze()
-    local lost = ModMuxScan.findLost()
+    local typeConflicts = ModMuxScan.scanTypes()
+    local lost, hidden = ModMuxScan.findLost()
     ModMuxScan.lost = lost
     local conflicts = {}
 
@@ -623,57 +584,61 @@ function ModMuxScan.analyze()
     for id in pairs(lost) do
         ids[id] = true
     end
+    for id in pairs(hidden) do
+        ids[id] = true
+    end
     for id in pairs(ids) do
         local slot = ModMuxScan.slots[id]
         if slot == nil then
             local tbl, key, containerMod = ModMuxScan.lookup(id)
             local value = tbl ~= nil and rawget(tbl, key) or nil
             if value ~= nil then
-                local layers, floor, guessed = ModMuxScan.parse(value, id, containerMod)
-                slot = makeSlot(id, ModMuxScan.splitId(id), key, tbl, containerMod, value, layers, floor, guessed)
+                local layers, floor = ModMuxScan.parse(value, id, containerMod)
+                slot = makeSlot(id, ModMuxScan.splitId(id), key, tbl, containerMod, value, layers, floor)
             end
         end
         if slot ~= nil then
-            local lostList = lost[id] or {}
+            local entries = {}
+            for _, entry in ipairs(lost[id] or {}) do
+                table.insert(entries, entry)
+            end
+            for _, entry in ipairs(hidden[id] or {}) do
+                table.insert(entries, entry)
+            end
             local mods, seen = {}, {}
             for _, owner in ipairs(slot.mods) do
                 seen[owner] = true
                 table.insert(mods, owner)
             end
-            for _, entry in ipairs(lostList) do
+            local fromOthers = false
+            for _, entry in ipairs(entries) do
                 if not seen[entry.mod] then
                     seen[entry.mod] = true
                     table.insert(mods, 1, entry.mod)
                 end
-            end
-            local lostFromOthers = false
-            for _, entry in ipairs(lostList) do
                 for _, owner in ipairs(slot.mods) do
                     if owner ~= entry.mod then
-                        lostFromOthers = true
+                        fromOthers = true
                     end
                 end
             end
-            if #mods >= 2 or lostFromOthers then
+            if #mods >= 2 or fromOthers then
                 local lockReason = ModMuxLevers.lockReason(slot.container, slot.key)
-                addConflict(conflicts, {id = id, type = "slot", slot = slot, layers = slot.layers, floor = slot.floor,
-                    lost = lostList, mods = mods, kind = ModMuxScan.classify(slot.layers, lostList),
-                    category = ModMuxScan.categoryOf(slot.container, slot.key), locked = lockReason ~= nil,
-                    lockReason = lockReason})
+                local conflict = {id = id, type = "slot", slot = slot, layers = slot.layers, floor = slot.floor,
+                    entries = entries, mods = mods, category = ModMuxScan.categoryOf(slot.container, slot.key),
+                    locked = lockReason ~= nil, lockReason = lockReason}
+                ModMuxScan.reshape(conflict)
+                table.insert(conflicts, conflict)
             end
         end
     end
 
-    for _, conflict in ipairs(ModMuxScan.scanTypes()) do
-        addConflict(conflicts, conflict)
+    for _, conflict in ipairs(typeConflicts) do
+        conflict.severity = ModMuxScan.SEVERITY[conflict.kind] or 1
+        table.insert(conflicts, conflict)
     end
 
-    table.sort(conflicts, function(a, b)
-        if a.severity ~= b.severity then
-            return a.severity > b.severity
-        end
-        return a.id < b.id
-    end)
+    sortConflicts(conflicts)
     ModMuxScan.conflicts = conflicts
     ModMuxScan.conflictById = {}
     for _, conflict in ipairs(conflicts) do
@@ -684,6 +649,7 @@ end
 
 --- Vehicle and placeable types: the game chains every specialization's overwritten function itself (each gets the
 -- previous one as superFunc). Two mods in one chain both run, the outer one decides whether the inner one does.
+-- The records of these chains are marked: they are the game's doing, never lost changes.
 function ModMuxScan.scanTypes()
     local groups, list = {}, {}
     local managers = {{manager = g_vehicleTypeManager, label = "vehicle"}, {manager = g_placeableTypeManager, label = "placeable"}}
@@ -699,31 +665,31 @@ function ModMuxScan.scanTypes()
                 if type(functions) == "table" then
                     local typeName = type(typeEntry.name) == "string" and typeEntry.name or tostring(typeKey)
                     for funcName, f in pairs(functions) do
-                        if type(f) == "function" and type(funcName) == "string" then
-                            local info = ModMuxOrigin.info(f)
-                            if ModMuxScan.kinds[info.signature] ~= nil or ModMuxScan.recordByWrapper[f] ~= nil
-                                or ModMuxOrigin.isMod(info.owner) then
-                                local layers = ModMuxScan.parse(f, nil, nil)
-                                -- a specialization's own new function is its base; only overwrites take part
-                                local overwrites = {}
-                                for _, layer in ipairs(layers) do
-                                    if layer.kind ~= "replace" then
-                                        table.insert(overwrites, layer)
-                                    end
+                        if type(f) == "function" and type(funcName) == "string"
+                            and (ModMuxScan.recordByWrapper[f] ~= nil or isMod(ModMuxOrigin.ofFunction(f))) then
+                            local layers = ModMuxScan.parse(f, nil, nil)
+                            -- a specialization's own new function is its base; only overwrites take part
+                            local overwrites = {}
+                            for _, layer in ipairs(layers) do
+                                if layer.record ~= nil then
+                                    layer.record.inTypes = true
                                 end
-                                local mods = ModMuxScan.modsOf(overwrites)
-                                if #mods >= 2 then
-                                    local id = entry.label .. ":" .. funcName .. "|" .. table.concat(mods, "+")
-                                    local group = groups[id]
-                                    if group == nil then
-                                        group = {id = id, type = "types", typeKind = entry.label, key = funcName, mods = mods,
-                                            layers = overwrites, types = {}, kind = "types", lost = {}, locked = true,
-                                            lockReason = "types", category = ModMuxScan.categoryOf(typeName, funcName)}
-                                        groups[id] = group
-                                        table.insert(list, group)
-                                    end
-                                    table.insert(group.types, typeName)
+                                if layer.kind ~= "replace" then
+                                    table.insert(overwrites, layer)
                                 end
+                            end
+                            local mods = ModMuxScan.modsOf(overwrites)
+                            if #mods >= 2 then
+                                local id = entry.label .. ":" .. funcName .. "|" .. table.concat(mods, "+")
+                                local group = groups[id]
+                                if group == nil then
+                                    group = {id = id, type = "types", typeKind = entry.label, key = funcName, mods = mods,
+                                        layers = overwrites, types = {}, kind = "types", lost = {}, hidden = {}, entries = {},
+                                        locked = true, lockReason = "types", category = ModMuxScan.categoryOf(typeName, funcName)}
+                                    groups[id] = group
+                                    table.insert(list, group)
+                                end
+                                table.insert(group.types, typeName)
                             end
                         end
                     end
@@ -735,6 +701,131 @@ function ModMuxScan.scanTypes()
         table.sort(group.types)
     end
     return list
+end
+
+----------------------------------------------------------------------------------------------------------------
+-- Evidence while playing: does a change hidden under a plain replacement still run?
+----------------------------------------------------------------------------------------------------------------
+
+--- After the levers: every conflict with hidden changes (and blocked ones from earlier loads) gets a counter around
+-- its function, and the probes start from zero. Conflicts whose chain a lever rebuilt are left out.
+function ModMuxScan.startEvidence()
+    local watched = 0
+    for _, conflict in ipairs(ModMuxScan.conflicts) do
+        local applied = ModMuxLevers.applied[conflict.id]
+        if conflict.type == "slot" and not (applied ~= nil and applied.done) then
+            local entries = {}
+            for _, entry in ipairs(conflict.entries) do
+                if entry.replacer ~= nil then
+                    entry.record.ran = false
+                    table.insert(entries, entry)
+                end
+            end
+            local slot = conflict.slot
+            local inner = rawget(slot.table, slot.key)
+            if #entries > 0 and type(inner) == "function" then
+                local counts = {n = 0}
+                local counter = function(...)
+                    counts.n = counts.n + 1
+                    return inner(...)
+                end
+                ModMuxScan.transparent[counter] = inner
+                slot.table[slot.key] = counter
+                conflict.watch = {counts = counts, entries = entries}
+                watched = watched + 1
+            end
+        end
+    end
+    return watched
+end
+
+--- Reads the probes. Returns true when a verdict changed (the conflicts are sorted again).
+function ModMuxScan.updateEvidence()
+    local changed = false
+    for _, conflict in ipairs(ModMuxScan.conflicts) do
+        local watch = conflict.watch
+        if watch ~= nil then
+            local reshape = false
+            for _, entry in ipairs(watch.entries) do
+                local verdict = nil
+                if entry.record.ran then
+                    verdict = "runs"
+                elseif watch.counts.n >= ModMuxScan.EVIDENCE_CALLS then
+                    verdict = "blocked"
+                end
+                entry.calls = watch.counts.n
+                if verdict ~= nil then
+                    entry.seenNow = true
+                    if verdict ~= entry.verdict then
+                        entry.verdict = verdict
+                        ModMuxScan.verdicts[entry.key] = verdict
+                        ModMuxScan.verdictsChanged = true
+                        changed = true
+                    end
+                    local state = verdict == "blocked" and "lost" or "runs"
+                    if state ~= entry.state then
+                        entry.state = state
+                        entry.confirmed = true
+                        reshape = true
+                        changed = true
+                    end
+                end
+            end
+            if reshape then
+                ModMuxScan.reshape(conflict)
+            end
+        end
+    end
+    if changed then
+        sortConflicts(ModMuxScan.conflicts)
+    end
+    return changed
+end
+
+function ModMuxScan.loadVerdicts(path)
+    ModMuxScan.verdicts = {}
+    if not fileExists(path) then
+        return
+    end
+    local xml = loadXMLFile("ModMuxEvidence", path)
+    if xml == nil or xml == 0 then
+        return
+    end
+    local i = 0
+    while true do
+        local key = string.format("modMuxEvidence.item(%d)", i)
+        local id = getXMLString(xml, key .. "#key")
+        if id == nil then
+            break
+        end
+        local verdict = getXMLString(xml, key .. "#verdict")
+        if verdict == "runs" or verdict == "blocked" then
+            ModMuxScan.verdicts[id] = verdict
+        end
+        i = i + 1
+    end
+    delete(xml)
+end
+
+function ModMuxScan.saveVerdicts(path)
+    local xml = createXMLFile("ModMuxEvidence", path, "modMuxEvidence")
+    if xml == nil or xml == 0 then
+        return false
+    end
+    local keys = {}
+    for key in pairs(ModMuxScan.verdicts) do
+        table.insert(keys, key)
+    end
+    table.sort(keys)
+    for i, key in ipairs(keys) do
+        local node = string.format("modMuxEvidence.item(%d)", i - 1)
+        setXMLString(xml, node .. "#key", key)
+        setXMLString(xml, node .. "#verdict", ModMuxScan.verdicts[key])
+    end
+    saveXMLFile(xml)
+    delete(xml)
+    ModMuxScan.verdictsChanged = false
+    return true
 end
 
 ----------------------------------------------------------------------------------------------------------------

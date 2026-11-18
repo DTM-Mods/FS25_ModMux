@@ -9,8 +9,8 @@ import zipfile
 project = pathlib.Path(__file__).resolve().parent.parent
 out = pathlib.Path(sys.argv[1])
 
-files = ["modDesc.xml", "icon_ModMux.dds", "config/knownIncompatible.xml", "gui/ModMuxFrame.xml", "gui/modMux_tabIcon.dds",
-         "gui/modMux_ui.dds"]
+files = ["modDesc.xml", "icon_ModMux.dds", "gui/ModMuxFrame.xml", "gui/modMux_tabIcon.dds", "gui/modMux_ui.dds"]
+files += sorted(p.relative_to(project).as_posix() for p in (project / "config").glob("*.xml"))
 files += sorted(p.relative_to(project).as_posix() for p in (project / "scripts").rglob("*.lua"))
 files += sorted(p.relative_to(project).as_posix() for p in (project / "translations").glob("*.xml"))
 

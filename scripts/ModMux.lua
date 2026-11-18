@@ -506,6 +506,8 @@ function ModMux.boot()
     if not ModMux.killSwitch then
         ModMuxScan.install()
         ModMux.installSaveGuard()
+        -- only watches: on in safe mode too, so the ERRORS tab still helps find what broke
+        ModMuxErrors.install()
     end
 
     -- only a flag: the work follows on ModMux's first update, outside the game's loading
@@ -641,6 +643,7 @@ function ModMux.onMissionLoaded()
         ModMuxScan.startEvidence()
     end
 
+    ModMux.guard("key bindings", ModMuxKeys.refresh)
     ModMuxReview.loadKnownPairs({ModMux.MOD_DIR .. "config/knownIncompatible.xml", ModMux.settingsDir .. "knownIncompatible.xml"})
     ModMuxReview.build(conflicts)
     ModMux.writeReport()
@@ -756,6 +759,8 @@ function ModMux:deleteMap()
     end
     if ModMux.missionLoaded then
         ModMux.checkEvidence()
+        -- the report gets the errors seen while playing
+        ModMux.guard("report", ModMux.writeReport)
     end
     ModMuxPerf.stopHudScan()
     removeConsoleCommand("modMux")
@@ -890,6 +895,35 @@ function ModMux.buildReport()
     if #parked > 0 then
         add("")
         add("PARKED: %s", table.concat(parked, ", "))
+    end
+    if #ModMuxKeys.conflicts > 0 then
+        local modCount, gameCount = ModMuxKeys.counts()
+        add("")
+        add("KEYS: %d shared by mods, %d shared with the game", modCount, gameCount)
+        for _, conflict in ipairs(ModMuxKeys.conflicts) do
+            local names = {}
+            for _, entry in ipairs(conflict.actions) do
+                table.insert(names, string.format("%s (%s)", entry.name, entry.mod or "game"))
+            end
+            add("- %s%s: %s", conflict.device == ModMuxKeys.KEYBOARD and "" or "controller ", conflict.keyText,
+                table.concat(names, ", "))
+        end
+    end
+    local errorList = ModMuxErrors.list(false, false)
+    if #errorList > 0 then
+        local errors, warnings, mods = ModMuxErrors.counts()
+        add("")
+        add("ERRORS: %d errors, %d warnings from %d mods (log lines from ModMux's load on, and per-frame scripts that stopped)",
+            errors, warnings, mods)
+        local last = nil
+        for _, entry in ipairs(errorList) do
+            if entry.mod ~= last then
+                last = entry.mod
+                add("  %s", ModMuxOrigin.isMod(entry.mod) and ModMuxOrigin.title(entry.mod) .. " (" .. entry.mod .. ")"
+                    or "Game / not attributed")
+            end
+            add("    [%s x%d] %s", entry.level, entry.count, entry.text)
+        end
     end
     local findings = ModMuxReview.list(ModMux.settings.dismissed, true)
     if #findings > 0 then

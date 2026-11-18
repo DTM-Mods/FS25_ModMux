@@ -1,8 +1,8 @@
-"""Mock-ups of the Switchboard page: runs ModMux in the offline test's fake game (fake mods, see tests/test_offline.py),
+"""Mock-ups of the ModMux page: runs ModMux in the offline test's fake game (fake mods, see tests/test_offline.py),
 takes the real tab models (rows, details, buttons) and draws them in the page's own layout and colours
 (gui/ModMuxFrame.xml) with headless Chrome, 1920x1080. They are previews for the README / the user, NOT in-game
 screenshots: never upload them to ModHub.
-Usage: python tools/make_preview.py            (needs lupa and Chrome)  -> previews/switchboard_<tab>.png"""
+Usage: python tools/make_preview.py            (needs lupa and Chrome)  -> previews/page_<tab>.png"""
 import html
 import os
 import pathlib
@@ -61,6 +61,7 @@ local row = model.rows[sel]
 local out = {columns = model.columns, subHeader = model.subHeader or "", footer = model.footer or "",
     footerColor = model.footerColor or "", empty = model.emptyText or "", sel = sel, rows = {},
     detailTitle = row ~= nil and row.detailTitle or "", detail = ModMuxFrame.detailLines(row, 24, 60), buttons = {}}
+out.tabs = ModMuxTabs.tabTexts()
 for i, r in ipairs(model.rows) do
     out.rows[i] = {cells = r.cells, colors = {r.colors and r.colors[1] or "", r.colors and r.colors[2] or "",
         r.colors and r.colors[3] or "", r.colors and r.colors[4] or ""}}
@@ -82,7 +83,7 @@ def py(value):
     return value
 
 
-TABS = ["CONFLICTS", "LIVE", "VEHICLE", "PERFORMANCE", "REVIEW", "PROFILES"]
+TABS = ["OVERVIEW", "CONFLICTS", "KEYS", "ERRORS", "LIVE", "VEHICLE", "PERFORMANCE", "REVIEW", "PROFILES"]
 COLORS = {"good": "#78b30f", "warn": "#e8b021", "bad": "#e35c4d", "dim": "#8c8c8c", "": "#aaaaa5"}
 CSS = """
 body{margin:0;width:1920px;height:1080px;font-family:'Segoe UI',Arial,sans-serif;color:#ebebeb;
@@ -96,7 +97,7 @@ body{margin:0;width:1920px;height:1080px;font-family:'Segoe UI',Arial,sans-serif
 .head .ic{width:64px;height:64px;background:#8dc63f;border-radius:4px;display:flex;align-items:center;justify-content:center}
 .head h1{margin:0;font-size:34px;font-weight:700;letter-spacing:1px;text-transform:uppercase}
 .tabs{position:absolute;left:170px;top:196px;display:flex}
-.tabs div{width:255px;height:57px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;
+.tabs div{width:175px;height:57px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;
   color:#aaaaa5;letter-spacing:1px}
 .tabs div.on{color:#fff;background:linear-gradient(#2c3420,#1c1d1b);border-bottom:3px solid #8dc63f}
 .line{position:absolute;left:170px;width:1580px;height:2px;background:#8dc63f}
@@ -139,7 +140,8 @@ def page(tab, data, icon_uri):
         rows.append(f'<div class="row{" sel" if i == data["sel"] else ""}">{"".join(spans)}</div>')
     cols = "".join(f'<span style="left:{XS[i]}px">{html.escape(str(c))}</span>' for i, c in enumerate(data["columns"]))
     detail = "".join(f"<p>{html.escape(str(line))}</p>" for line in data["detail"])
-    tabs = "".join(f'<div class="{"on" if i == tab else ""}">{name}</div>' for i, name in enumerate(TABS, 1))
+    tabs = "".join(f'<div class="{"on" if i == tab else ""}">{html.escape(str(name))}</div>'
+                   for i, name in enumerate(data.get("tabs") or TABS, 1))
     pages = "".join('<div></div>' for _ in range(9)) + f'<div class="on"><img src="{icon_uri}" width="40"></div>'
     buttons = '<span><b>Esc</b>Back</span>' + "".join(f"<span><b>&#9679;</b>{html.escape(str(b))}</span>" for b in data["buttons"])
     empty = f'<div class="empty">{html.escape(str(data["empty"]))}</div>' if not data["rows"] else ""
@@ -147,7 +149,7 @@ def page(tab, data, icon_uri):
     return f"""<html><head><meta charset="utf-8"><style>{CSS}</style></head><body><div class="shade"></div>
 <div class="mock">MOCK-UP, NOT IN GAME</div>
 <div class="pages">{pages}</div>
-<div class="head"><div class="ic"><img src="{icon_uri}" width="48"></div><h1>ModMux Switchboard</h1></div>
+<div class="head"><div class="ic"><img src="{icon_uri}" width="48"></div><h1>ModMux</h1></div>
 <div class="tabs">{tabs}</div><div class="line" style="top:253px"></div>
 <div class="sub">{html.escape(str(data["subHeader"]))}</div>
 <div class="cols">{cols}</div><div class="line" style="top:332px;width:1000px;height:1px;background:#3a3d36"></div>
@@ -183,13 +185,17 @@ dark.save(icon_png)
 icon_uri = icon_png.as_uri()
 
 SHOTS = [
-    ("conflicts_simple", 1, 1, "mod:FS25_NovaPhysics"),
-    ("conflicts_advanced", 1, 3, "Vehicle.draw"),
-    ("conflicts_category", 1, 2, None),
-    ("live", 2, 1, None),
-    ("vehicle", 3, 1, None),
-    ("performance", 4, 1, "perf:FS25_NovaPhysics"),
-    ("review", 5, 1, None),
+    ("overview", 1, 1, None),
+    ("conflicts_pairs", 2, 1, "pair:FS25_OmegaPlus>FS25_NovaPhysics"),
+    ("conflicts_simple", 2, 2, "mod:FS25_NovaPhysics"),
+    ("conflicts_advanced", 2, 4, "Vehicle.draw"),
+    ("conflicts_category", 2, 3, None),
+    ("keys", 3, 1, None),
+    ("errors", 4, 1, None),
+    ("live", 5, 1, None),
+    ("vehicle", 6, 1, None),
+    ("performance", 7, 1, "perf:FS25_NovaPhysics"),
+    ("review", 8, 1, None),
 ]
 outdir = project / "previews"
 outdir.mkdir(exist_ok=True)
@@ -199,6 +205,6 @@ for name, tab, view, select in SHOTS:
     data.setdefault("detail", [])
     data.setdefault("buttons", [])
     data.setdefault("columns", [])
-    out = outdir / f"switchboard_{name}.png"
+    out = outdir / f"page_{name}.png"
     render(page(tab, data, icon_uri), out)
     print(out)

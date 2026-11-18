@@ -199,6 +199,9 @@ class Engine:
     def getUserProfileAppPath(self):
         return PROFILE
 
+    def hasText(self, key):
+        return key in TEXTS
+
     def getText(self, key):
         if key not in TEXTS:
             MISSING_TEXTS.add(key)
@@ -319,7 +322,7 @@ FarmManager = {SPECTATOR_FARM_ID = 0}
 g_farmManager = {farms = {{farmId = 1}}, getFarms = function(self) return self.farms end}
 g_vehicleTypeManager = {types = {tractor = {name = "tractor", functions = {getSpeedLimit = Vehicle.getSpeedLimit},
     eventListeners = {onUpdate = {}}}}, getTypes = function(self) return self.types end}
-g_i18n = {getText = function(self, key) return PY.getText(key) end}
+g_i18n = {getText = function(self, key) return PY.getText(key) end, hasText = function(self, key) return PY.hasText(key) end}
 g_currentMission = {missionInfo = {savegameDirectory = SAVEGAME}, hud = {drawSpeed = HUD.drawSpeed},
     getIsServer = function() return true end,
     addIngameNotification = function(self, kind, text) table.insert(NOTES, text) end}
@@ -410,8 +413,40 @@ function ZetaDrive:loadMap()
 end
 addModEventListener(ZetaDrive)
 ''',
-    "FS25_ZetaDrive_v2": "",
+    "FS25_ZetaDrive_v2": r'''
+-- a mod whose update can break (ERRORS: a per-frame script that stops), and log lines while it loads
+Brittle = {}
+function Brittle:loadMap() end
+function Brittle:update(dt) if BREAK_BRITTLE then error("brittle broke") end end
+addModEventListener(Brittle)
+Logging.warning("Unknown config value '%s' in %d places", "wheelSize", 3)
+print("Error: could not find the store image")
+Logging.warning("FS25_OmegaPlus looks old, %s", "please update")
+''',
 }
+
+# modDesc.xml of some fake mods: their input actions and default keys (KEYS tab)
+MOD_DESCS = {
+    "FS25_AlphaWheels": '<modDesc><actions><action name="AW_TOGGLE" category="VEHICLE"/></actions><inputBinding>'
+                        '<actionBinding action="AW_TOGGLE"><binding device="KB_MOUSE_DEFAULT" input="KEY_lctrl KEY_g"/>'
+                        '</actionBinding></inputBinding></modDesc>',
+    "FS25_OmegaPlus": '<modDesc><actions><action name="OP_MENU" category="VEHICLE ONFOOT"/></actions><inputBinding>'
+                      '<actionBinding action="OP_MENU"><binding device="KB_MOUSE_DEFAULT" input="KEY_g KEY_lctrl"/>'
+                      '</actionBinding></inputBinding></modDesc>',
+    "FS25_PiTools": '<modDesc><actions><action name="PI_MARK" category="ONFOOT"/><action name="PI_DRIVE" category="VEHICLE"/>'
+                    '</actions><inputBinding><actionBinding action="PI_MARK"><binding device="KB_MOUSE_DEFAULT" input="KEY_lalt KEY_k"/>'
+                    '</actionBinding><actionBinding action="PI_DRIVE"><binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_x"/>'
+                    '</actionBinding></inputBinding></modDesc>',
+    "FS25_ZetaDrive": '<modDesc><actions><action name="ZD_X" category="ONFOOT"/></actions><inputBinding>'
+                      '<actionBinding action="ZD_X"><binding device="KB_MOUSE_DEFAULT" input="KEY_lshift KEY_x"/>'
+                      '</actionBinding><actionBinding action="ZD_X"><binding device="KB_MOUSE_DEFAULT" input="KEY_lalt KEY_k"/>'
+                      '</actionBinding></inputBinding></modDesc>',
+}
+MODS_DIR = os.path.join(WORK, "mods").replace("\\", "/") + "/"
+for _name, _xml in MOD_DESCS.items():
+    os.makedirs(MODS_DIR + _name, exist_ok=True)
+    with open(MODS_DIR + _name + "/modDesc.xml", "w", encoding="utf-8") as _f:
+        _f.write(_xml)
 
 TITLES = {"FS25_ZetaDrive": "Zeta Drive", "FS25_ZetaDrive_v2": "Zeta Drive", "ACM_EarlyBird": "Early Bird"}
 # a mod whose environment the game doesn't keep under its name: ModMux learns it while the mod loads
@@ -427,7 +462,7 @@ class Launch:
         self.lua = lua51.LuaRuntime(unpack_returned_tuples=True)
         g = self.lua.globals()
         self.g = g
-        g.PY = self.lua.table_from({name: getattr(self.engine, name) for name in PY_FUNCTIONS + ["getText"]})
+        g.PY = self.lua.table_from({name: getattr(self.engine, name) for name in PY_FUNCTIONS + ["getText", "hasText"]})
         g.PY_FUNCTIONS = self.lua.table_from(PY_FUNCTIONS)
         g.SAVEGAME = SAVEGAME
         self.loader = self.lua.eval('''function(src, chunkname, env)
@@ -445,7 +480,7 @@ class Launch:
         names = sorted(list(MODS_BEFORE) + [modmux] + list(MODS_AFTER), key=str.lower)
         mods = []
         for name in names:
-            mods.append({"modName": name, "title": TITLES.get(name, name[5:]), "modDir": f"C:/mods/{name}/",
+            mods.append({"modName": name, "title": TITLES.get(name, name[5:]), "modDir": MODS_DIR + name + "/",
                          "version": "1.0.0.0", "author": "Tester"})
         g.MODS = self.lua.table_from([self.lua.table_from(m) for m in mods])
         # like the game: an environment per mod whose lookups fall through to the game's globals, and
@@ -589,6 +624,64 @@ types = [Scan.conflictById[k] for k in Scan.conflictById if Scan.conflictById[k]
 check(len(types) == 1 and types[0].key == "getSpeedLimit" and lua_list(types[0].types) == ["tractor"], "vehicle type chain found")
 
 check(L.calls("Vehicle.draw({})") == ["omega:draw"], "Vehicle.draw runs only Omega before any lever")
+
+# WHO BEATS WHOM: one row per pair, what the one does to the other
+pairs = L.lua_in_env('''
+    local out = {}
+    for _, pair in ipairs(ModMuxTabs.pairList()) do
+        out[pair.top .. ">" .. pair.under] = pair.rel
+    end
+    return out''')
+print("  pairs:", dict(pairs.items()))
+# Omega / Zeta put in their own versions: until playing shows the others are blocked, they "may overwrite"
+check(pairs["FS25_OmegaPlus>FS25_NovaPhysics"] == "mayOverwrite", "Omega may overwrite Nova (Vehicle.draw)")
+check(pairs["FS25_ZetaDrive>FS25_PiTools"] == "mayOverwrite", "Zeta may overwrite Pi (HUD.drawSpeed)")
+check(pairs["FS25_OmegaPlus>FS25_BetaHud"] == "takesOver", "Omega takes over from Beta (wraps it)")
+check(pairs["FS25_NovaPhysics>FS25_BetaHud"] == "runsAfter", "Nova runs after Beta (appends on top)")
+check(pairs["FS25_NovaPhysics>FS25_AlphaWheels"] == "takesOver", "Nova takes over from Alpha (vehicle type chain is strongest)")
+check(pairs["FS25_AlphaWheels>FS25_NovaPhysics"] is None, "no pair the wrong way round")
+model = L.lua_in_env("return ModMuxTabs.build({tab = ModMuxTabs.CONFLICTS, view = ModMuxTabs.VIEW_PAIRS})")
+first = model.rows[1]
+check(first.cells[2] == "may overwrite", f"strongest pair first: {first.cells[1]} {first.cells[2]} {first.cells[3]}")
+check(first.cells[4] == "Check", f"verdict shown: {first.cells[4]}")
+shown = [model.rows[i].cells[2] for i in range(1, len(model.rows) + 1)]
+check("runs after" not in shown and "takes over" not in shown, f"only pairs that need a look by default: {shown}")
+model_all = L.lua_in_env("return ModMuxTabs.build({tab = ModMuxTabs.CONFLICTS, view = ModMuxTabs.VIEW_PAIRS, showHarmless = true})")
+check(len(model_all.rows) > len(model.rows), "Show all lists the harmless pairs too")
+check(L.env.ModMuxTabs.humanize("drawControlledEntityHUD") == "Draw controlled entity HUD", "function names in words")
+check(L.env.ModMuxTabs.functionText(L.conflict("HUD.drawSpeed")) == "HUD: draw speed", "class and function in words")
+badges = L.lua_in_env("return ModMuxTabs.tabTexts()")
+check(badges[2].startswith("CONFLICTS (") and badges[8].startswith("REVIEW ("), f"counts on the tabs: {list(badges.values())}")
+
+# OVERVIEW: one line per area, Open jumps there
+overview = L.lua_in_env("return ModMuxTabs.build({tab = ModMuxTabs.OVERVIEW, view = 1})")
+areas = [overview.rows[i].cells[1] for i in range(1, len(overview.rows) + 1)]
+print("  overview:", [(overview.rows[i].cells[1], overview.rows[i].cells[2], overview.rows[i].cells[4])
+                      for i in range(1, len(overview.rows) + 1)])
+check(areas[:2] == ["Mod fights", "Key clashes"], f"overview areas: {areas}")
+check(overview.rows[1].cells[4] == "Check", "mod fights: to check")
+goto = L.lua_in_env('''
+    local model = ModMuxTabs.build({tab = ModMuxTabs.OVERVIEW, view = 1})
+    return model.rows[1].actions[1].run()''')
+check(goto.gotoTab == L.env.ModMuxTabs.CONFLICTS, "Open goes to CONFLICTS")
+L.lua_in_env('ModMux.settings.picks["Vehicle.update"] = {mode = "shared"}')
+pending = L.lua_in_env("return ModMuxTabs.pendingLines()")
+check(len(pending) == 1 and "Vehicle: update" in pending[1], f"pending change listed in words: {list(pending.values())}")
+L.lua_in_env("ModMuxTabs.undoPending()")
+check(len(L.lua_in_env("return ModMuxTabs.pendingLines()")) == 0, "Undo all takes it back")
+L.lua_in_env('''
+    local model = ModMuxTabs.build({tab = ModMuxTabs.CONFLICTS, view = ModMuxTabs.VIEW_PAIRS})
+    for _, row in ipairs(model.rows) do
+        if row.id == "pair:FS25_OmegaPlus>FS25_NovaPhysics" then
+            for _, a in ipairs(row.actions) do
+                if a.id == "winUnder" then a.run() end
+            end
+        end
+    end''')
+rank = [L.env.ModMux.settings.rank[i] for i in range(1, len(L.env.ModMux.settings.rank) + 1)]
+check(rank == ["FS25_NovaPhysics"], f"Let Nova win ranks Nova above Omega: {rank}")
+check(L.env.ModMux.settings.picks["HUD.drawControlledEntityHUD"] is None, "a pair button mutes nobody (no winner picks)")
+L.lua_in_env("ModMux.settings.rank = {} ModMux.saveSettings()")
 check(L.calls("Vehicle.update({}, 16)") == ["game:update", "alpha:update", "nova:update"], "Vehicle.update natural order")
 check(L.calls("Vehicle.getFullName({})") == ["game:name", "early:name", "nova:name"], "probes don't change what runs")
 
@@ -641,7 +734,7 @@ check("Locked" in out, "console pick refuses a locked conflict")
 summary = ModMux.consoleSummary(ModMux)
 check("Vehicle.draw" in summary, "console summary lists conflicts")
 
-# settings for the next launch (as a player would set them in the Switchboard)
+# settings for the next launch (as a player would set them on the ModMux page)
 L.lua_in_env('''
     ModMux.settings.picks["Vehicle.draw"] = {mode = "shared"}
     ModMux.settings.rank = {"FS25_PiTools"}
@@ -722,9 +815,9 @@ check(L2.env.ModMux.safeReason == "abnormal", "next start in safe mode after the
 os.remove(os.path.join(SAVEGAME, "farms.xml"))
 
 # ---------------------------------------------------------------------------------------------------------------
-# Launch 6: the Switchboard (every tab, view, row and button), profiles, live settings, vehicle
+# Launch 6: the ModMux page (every tab, view, row and button), profiles, live settings, vehicle
 # ---------------------------------------------------------------------------------------------------------------
-print("launch 6: switchboard")
+print("launch 6: the page")
 L = Launch()
 L.lua_in_env("ModMux.resumeLevers()")
 L = Launch()
@@ -777,8 +870,8 @@ local cell = {attrs = {}}
 function cell:getAttribute(name) self.attrs[name] = self.attrs[name] or fake() return self.attrs[name] end
 cell.elements = {}
 
-for tab = 1, 6 do
-    local views = tab == 1 and 3 or 1
+for tab = 1, 9 do
+    local views = tab == ModMuxTabs.CONFLICTS and 4 or 1
     for view = 1, views do
         frame.ui.view = view
         frame:showTab(tab)
@@ -820,7 +913,7 @@ return results
 '''
 res = L.lua_in_env(ui_test)
 print(f"  rows {res.rows}, button presses {res.actions}, vehicle rows {res.vehicleRows}, dialogs {res.dialogs}")
-check(res.rows >= 20, "the Switchboard showed rows on its tabs")
+check(res.rows >= 20, "the page showed rows on its tabs")
 check(res.actions >= 20, "buttons pressed")
 check(res.vehicleRows >= 10, "vehicle rows")
 check(res.profiles >= 1, "profile saved through the dialog")
@@ -855,6 +948,68 @@ L8.load_mission()
 check(L8.env.ModMux.loadPosition() == 4, "three mods load before FS25_ModMux")
 check(L8.conflict("HUD.drawControlledEntityHUD") is not None, "later mods are still watched")
 check("loaded before ModMux" in L8.env.ModMux.buildReport(), "report names the mods loaded before ModMux")
+# the page test pressed every button ("Timers off", "Park"): launch 9 needs timers and nothing parked
+L8.lua_in_env("ModMux.settings.options.perfProbes = true ModMux.settings.hibernate = {} ModMux.resumeLevers()")
+L8.lua.execute("for _, l in ipairs(g_modEventListeners) do if l.deleteMap then l:deleteMap() end end")
+
+# ---------------------------------------------------------------------------------------------------------------
+# Launch 9: KEYS and ERRORS
+# ---------------------------------------------------------------------------------------------------------------
+print("launch 9: keys and errors")
+# the player's saved keys: PI_MARK moved off Left Alt + K, the game's SWITCH_SEAT on Left Ctrl + G
+with open(PROFILE + "inputBinding.xml", "w", encoding="utf-8") as f:
+    f.write('<inputBinding><actionBinding action="SWITCH_SEAT"><binding device="KB_MOUSE_DEFAULT" input="KEY_lctrl KEY_g"/>'
+            '</actionBinding><actionBinding action="PI_MARK"><binding device="KB_MOUSE_DEFAULT" input="KEY_lalt KEY_j"/>'
+            '</actionBinding></inputBinding>')
+L9 = Launch()
+L9.load_mission()
+keys = L9.env.ModMuxKeys
+ids = [keys.conflicts[i].id for i in range(1, len(keys.conflicts) + 1)]
+print("  key conflicts:", ids)
+ctrl_g = next((keys.conflicts[i] for i in range(1, len(keys.conflicts) + 1)
+               if keys.conflicts[i].id == "keys:KB_MOUSE_DEFAULT|KEY_lctrl KEY_g"), None)
+check(ctrl_g is not None and ctrl_g.kind == "mods", "Left Ctrl + G: Alpha Wheels and Omega Plus clash")
+if ctrl_g is not None:
+    names = sorted(ctrl_g.actions[i].name for i in range(1, len(ctrl_g.actions) + 1))
+    check(names == ["AW_TOGGLE", "OP_MENU", "SWITCH_SEAT"], f"Left Ctrl + G actions (the game's too): {names}")
+    check(ctrl_g.keyText == "Left Ctrl + G", "keys shown readable")
+check(not any("KEY_lshift KEY_x" in i for i in ids), "on foot vs. in a vehicle is no clash")
+check(not any("KEY_lalt KEY_k" in i for i in ids), "the player's own key (inputBinding.xml) wins over a mod's default")
+check(L9.env.ModMuxKeys.stats.fromFile, "keys read from inputBinding.xml")
+
+errs = L9.env.ModMuxErrors
+entries = [errs.entries[i] for i in range(1, len(errs.entries) + 1)]
+for e in entries:
+    print(f"  error entry: {e.mod} {e.level} {e.how} {e.text!r}")
+check(any(e.mod == "FS25_ZetaDrive_v2" and e.level == "warning" and "wheelSize" in e.text and "3 places" in e.text
+          for e in entries), "warning while a mod loads goes to that mod, formatted")
+check(any(e.mod == "FS25_ZetaDrive_v2" and e.level == "error" and e.how == "print" for e in entries), "printed error recorded")
+check(any(e.mod == "FS25_OmegaPlus" and "looks old" in e.text for e in entries), "a message naming a mod goes to that mod")
+check(not any("ModMux" in e.mod for e in entries), "ModMux's own lines are not listed")
+check(L9.env.ModMuxPerf.installed, "launch 9 has timers")
+L9.lua.execute("BREAK_BRITTLE = true")
+L9.lua.execute('''
+    for i = 1, 3 do
+        for _, listener in ipairs(g_modEventListeners) do
+            if listener.update ~= nil then
+                local ok = pcall(listener.update, listener, 16)  -- the engine catches a listener's error and goes on
+            end
+        end
+    end''')
+L9.lua.execute("BREAK_BRITTLE = nil")
+L9.frames(1)
+entries = [errs.entries[i] for i in range(1, len(errs.entries) + 1)]
+stop = [e for e in entries if e.how == "stop"]
+check(len(stop) == 1 and stop[0].mod == "FS25_ZetaDrive_v2" and stop[0].count >= 2, f"stopped update seen per frame: {[(e.mod, e.count) for e in stop]}")
+check(L9.env.ModMuxPerf.open is None, "no call left open after a good frame")
+model = L9.lua_in_env("return ModMuxTabs.build({tab = ModMuxTabs.ERRORS, view = 1})")
+first = [model.rows[i].cells[1] for i in range(1, len(model.rows) + 1)]
+check(first == sorted(first[:len([x for x in first if x != "Game / not attributed"])]) + [x for x in first if x == "Game / not attributed"],
+      f"errors sorted by mod: {first}")
+report = L9.env.ModMux.buildReport()
+check("KEYS:" in report and "ERRORS:" in report and "brittle" not in report.lower() or "stopped" in report, "report has keys and errors")
+check("Left Ctrl + G" in report, "report lists the key clash")
+os.remove(PROFILE + "inputBinding.xml")
 
 check(not MISSING_TEXTS, f"texts used but missing in l10n: {sorted(MISSING_TEXTS)}")
 

@@ -1,5 +1,5 @@
 """Makes ModMux's textures (needs Pillow 13+, which writes DXT1 / DXT5 .dds without mipmaps):
-  gui/modMux_ui.dds       64x64 plain white (DXT1, opaque): tinted row / panel fills of the Switchboard
+  gui/modMux_ui.dds       64x64 plain white (DXT1, opaque): tinted row / panel fills of the ModMux page
   gui/modMux_tabIcon.dds  256x256 white multiplexer symbol on transparent (DXT5): the ESC menu tab and page header
   icon_ModMux.dds         512x512 DXT1 mod icon, from icon_ModMux.png (made by _brand/tools/make_icons.py --modhub modMux)
 Usage: python -I tools/make_textures.py"""

@@ -147,15 +147,18 @@ end
 -- Timing
 ----------------------------------------------------------------------------------------------------------------
 
-local function finish(stats, t0, previous, ...)
+-- ModMuxPerf.open: the timed call running right now ({mod, text}). A call that never returns (a Lua error unwound
+-- through it) leaves it set; endFrame reports that as the mod's script stopping (ERRORS tab).
+local function finish(stats, t0, previous, previousOpen, ...)
     stats.acc = stats.acc + (clock() - t0) * 1000
     ModMuxPerf.current = previous
+    ModMuxPerf.open = previousOpen
     return ...
 end
 
 local wrappedKeys = {}
 
-function ModMuxPerf.wrap(tbl, name, mod)
+function ModMuxPerf.wrap(tbl, name, mod, label)
     local inner = rawget(tbl, name)
     if type(inner) ~= "function" or inner == noop then
         return false
@@ -166,11 +169,13 @@ function ModMuxPerf.wrap(tbl, name, mod)
     end
     wrappedKeys[tbl][name] = true
     local stats = ModMuxPerf.getStats(mod)
+    local open = {mod = mod, text = label or name}
     local wrapper = function(...)
-        local previous = ModMuxPerf.current
+        local previous, previousOpen = ModMuxPerf.current, ModMuxPerf.open
         ModMuxPerf.current = mod
+        ModMuxPerf.open = open
         local t0 = clock()
-        return finish(stats, t0, previous, inner(...))
+        return finish(stats, t0, previous, previousOpen, inner(...))
     end
     ModMuxScan.transparent[wrapper] = inner
     tbl[name] = wrapper
@@ -211,7 +216,9 @@ function ModMuxPerf.install()
                                 done[spec][eventName] = true
                                 local owner = ModMuxOrigin.ofFunction(rawget(spec, eventName))
                                 if ModMuxOrigin.isMod(owner) and owner ~= ModMux.MOD_NAME then
-                                    ModMuxPerf.wrap(spec, eventName, owner)
+                                    local className = rawget(spec, "className")
+                                    ModMuxPerf.wrap(spec, eventName, owner,
+                                        (type(className) == "string" and className or "specialization") .. "." .. eventName)
                                 end
                             end
                         end
@@ -224,6 +231,11 @@ end
 
 --- Once per frame (ModMux's update): closes the frame's numbers.
 function ModMuxPerf.endFrame()
+    if ModMuxPerf.open ~= nil then
+        local open = ModMuxPerf.open
+        ModMuxPerf.open = nil
+        ModMuxErrors.onStop(open.mod, open.text)
+    end
     ModMuxPerf.current = nil
     local now = clock()
     if ModMuxPerf.lastFrameAt ~= nil then

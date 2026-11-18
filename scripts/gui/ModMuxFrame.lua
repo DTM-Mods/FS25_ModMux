@@ -1,4 +1,4 @@
--- ModMux: the Switchboard, a page of the ESC menu (same way of adding a page as Player Trading+, checked in game).
+-- ModMux: its page in the ESC menu (same way of adding a page as Player Trading+, checked in game).
 -- Six tabs over one list and a details panel. What a tab shows and what its buttons do comes from ModMuxTabs; this
 -- file only draws it and passes the buttons on.
 
@@ -27,7 +27,7 @@ ModMuxFrame.instance = nil
 function ModMuxFrame.new()
     local self = ModMuxFrame:superClass().new(nil, ModMuxFrame_mt)
     self.hasCustomMenuButtons = true
-    self.ui = {tab = ModMuxTabs.CONFLICTS, view = ModMuxTabs.VIEW_SIMPLE, showDismissed = false}
+    self.ui = {tab = ModMuxTabs.OVERVIEW, view = ModMuxTabs.VIEW_PAIRS, showDismissed = false}
     self.model = {rows = {}, columns = {}, globalActions = {}}
     self.selectedId = nil
     self.refreshTimer = 0
@@ -59,7 +59,7 @@ function ModMuxFrame.register()
     end
     local inGameMenu = g_gui.screenControllers[InGameMenu]
     if inGameMenu == nil or inGameMenu.pagingElement == nil or inGameMenu.registerPage == nil or inGameMenu.addPageTab == nil then
-        Logging.warning("%s the ESC menu can't take new pages, the Switchboard is not added (console: modMux)", ModMux.TAG)
+        Logging.warning("%s the ESC menu can't take new pages, the ModMux page is not added (console: modMux)", ModMux.TAG)
         return
     end
 
@@ -96,7 +96,7 @@ function ModMuxFrame.register()
 
     frame:initialize()
     ModMuxFrame.instance = frame
-    print(ModMux.TAG .. " Switchboard page added to the ESC menu")
+    print(ModMux.TAG .. " page added to the ESC menu")
 end
 
 function ModMuxFrame.unregister()
@@ -241,8 +241,27 @@ function ModMuxFrame:selectedRow()
 end
 
 --- builds the model again and redraws, keeping the selected row
+--- tab texts with how many things each tab wants you to look at: "CONFLICTS (3)"
+function ModMuxFrame:updateTabTexts()
+    local texts = ModMuxTabs.tabTexts()
+    for i, text in ipairs(texts) do
+        local button = self.mainTabs ~= nil and self.mainTabs[i] or nil
+        if button ~= nil and button.setText ~= nil then
+            button:setText(text)
+        end
+    end
+    if self.mainPaging ~= nil then
+        self.mainPaging:setTexts(texts)
+        self.mainPaging:setState(self.ui.tab)
+    end
+end
+
 function ModMuxFrame:rebuild()
     self.model = ModMuxTabs.build(self.ui)
+    if not self.model.live or self.tabTextsDone ~= self.ui.tab then
+        self.tabTextsDone = self.ui.tab
+        self:updateTabTexts()
+    end
     local model = self.model
     for i = 1, 4 do
         if self.colHead ~= nil then
@@ -384,6 +403,12 @@ function ModMuxFrame:handleRequest(request)
         end, self, request.default, request.askText, request.askText, ModMuxProfiles.MAX_NAME, ModMux.getText("mm_button_save"))
     elseif request.info ~= nil then
         InfoDialog.show(request.info)
+    elseif request.gotoTab ~= nil then
+        -- OVERVIEW's Open buttons
+        if request.view ~= nil then
+            self.ui.view = request.view
+        end
+        self:showTab(request.gotoTab)
     end
 end
 
@@ -443,6 +468,18 @@ end
 
 function ModMuxFrame:onClickTab6()
     self:showTab(6)
+end
+
+function ModMuxFrame:onClickTab7()
+    self:showTab(7)
+end
+
+function ModMuxFrame:onClickTab8()
+    self:showTab(8)
+end
+
+function ModMuxFrame:onClickTab9()
+    self:showTab(9)
 end
 
 function ModMuxFrame:onClickMainPaging(state)

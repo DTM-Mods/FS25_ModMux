@@ -25,7 +25,7 @@ ModMux reads how every mod has hooked into the game, finds the spots where two o
 what happens at each one. Then you decide.
 
 <p align="center">
-  <img src="previews/switchboard_conflicts_advanced.png" alt="Mock-up of the ModMux page: the ADVANCED view lists seven conflicts; the selected one shows that one mod's change to Vehicle.draw no longer runs because another mod replaced the function" width="100%">
+  <img src="previews/page_conflicts_pairs.png" alt="Mock-up of the ModMux page: CONFLICTS lists the pairs of mods where one may overwrite or takes over the other, with a verdict and a suggested fix" width="100%">
   <sub>Mock-up drawn from ModMux's real page data with test mods, not an in-game screenshot. More in <a href="previews/">previews/</a>.</sub>
 </p>
 
@@ -48,8 +48,10 @@ what happens at each one. Then you decide.
 - **A pecking order per area**: the same, but only for wheels, the HUD, the economy, weather, AI and so on. An area
   ranking overrides the general one.
 
-Three views show the same data at different depths: **SIMPLE** (the ranking), **BY CATEGORY** (the area rankings) and
-**ADVANCED** (each function on its own, with the complete chain of hooks).
+Four views show the same data at different depths: **WHO BEATS WHOM** (one line per pair of mods: which one
+*overwrites*, *may overwrite*, *takes over* or *runs after* the other, with buttons to let either one win), **SIMPLE**
+(the ranking), **BY CATEGORY** (the area rankings) and **ADVANCED** (each function on its own, with the complete chain
+of hooks).
 
 ### The other tabs
 
@@ -57,6 +59,9 @@ Three views show the same data at different depths: **SIMPLE** (the ranking), **
 |---|---|
 | LIVE | Switches and values that mods hand to ModMux; changing them takes effect right away. |
 | VEHICLE | Readings from the vehicle you're driving: speed, total mass, damage, wear, engine temperature, grip and slip of each wheel, which mods it contains and where they collide in its vehicle type. |
+| OVERVIEW | Where to start: one line per area with a verdict and an Open button, and what waits for the next load (with Undo all). |
+| KEYS | Keys and buttons that two mods use, or a mod and the game, in the same situation (on foot, in a vehicle), so one press does two things. Read from your own key settings; change them under Settings > Controls. |
+| ERRORS | Errors and warnings sorted by mod: what the mods write to the log while the game loads and while you play, and mods whose per-frame scripts stop with an error. Messages only the engine writes (missing textures) stay in log.txt. |
 | PERFORMANCE | How many milliseconds each mod takes per frame, compared with the frame rate you aim for. A heavy mod can be parked: its per-frame work stops from the next load, it stays installed. |
 | REVIEW | Hints with their reasons: two copies of the same mod, mods that cut each other off, mods whose HUDs sit on top of each other, pairs you've listed as incompatible. Hide a hint once you've dealt with it. |
 | PROFILES | Store the current set of decisions, rankings, parked mods and LIVE values under a name, and switch back to it later. |
@@ -154,7 +159,7 @@ mods, so nothing can look inside a function. Instead:
   (textures; the mod icon from `_brand/tools/make_icons.py <brand> <work> --modhub modMux`), `tools/make_readme.py`.
 - Test: `python tests/test_offline.py` runs everything in the game's Lua 5.1 (`pip install lupa`) with a fake game that
   works like the real one (no `debug`, an environment per mod) and fake mods fighting over functions, through several
-  starts (levers, evidence, safe mode, kill switch, abnormal load, every Switchboard button, loaded late).
+  starts (levers, evidence, safe mode, kill switch, abnormal load, every button of the page, loaded late).
 - Build: `python -I tools/build_zip.py dist/FS25_0_ModMux.zip`.
 
 </details>

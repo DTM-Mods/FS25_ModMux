@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <modDesc descVersion="116" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://validation.gdn.giants-software.com/xml/fs25/modDesc.xsd">
     <author>DTM Mods, Fennell</author>
-    <version>1.0.0.1</version>
+    <version>1.0.0.2</version>
     <title>
         <en>ModMux</en>
     </title>
@@ -12,13 +12,17 @@ GitHub: https://github.com/DTM-Mods/FS25_ModMux
 
 Important: keep the zip named FS25_0_ModMux.zip. The game loads mods in the order of their names, and ModMux has to load before the mods it watches: it sees every hook as it is made. Where a mod puts in its own version of a function, ModMux finds out while you play whether the hooks under it still run.
 
+Start on OVERVIEW: one line per area (mod fights, key clashes, errors, hints, performance, what waits for the next load), each with a verdict and a button that opens it.
+
 Decide per function or for whole mods:
 - Let one mod have its way on a function: only its hook stays there.
 - Bring back a hook that another mod threw away, so both run (shared chain).
 - Rank mods against each other, overall or only for one area (wheels, HUD, economy, weather, AI...). A higher mod runs last and has the final say.
-- Three views: SIMPLE (the ranking), BY CATEGORY (area rankings), ADVANCED (each function with its complete chain of hooks).
+- Four views: WHO BEATS WHOM (each pair of mods: which one overwrites or takes over the other), SIMPLE (the ranking), BY CATEGORY (area rankings), ADVANCED (each function with its complete chain of hooks).
 
 More tabs:
+- KEYS: keys and buttons that two mods (or a mod and the game) use in the same situation, so one press does two things. Read from your own key settings.
+- ERRORS: one line per mod with its errors and warnings, including mods whose scripts stop while you play.
 - LIVE: switches and values that mods hand to ModMux, applied at once.
 - VEHICLE: readings from the vehicle you drive: speed, mass, damage, wear, engine temperature, grip and slip per wheel, the mods inside it.
 - PERFORMANCE: milliseconds per frame for each mod against your target frame rate. Park a heavy mod's per-frame work without uninstalling it.
@@ -35,6 +39,14 @@ Safety:
 Console for dedicated servers: modMux, modMuxPick, modMuxPark, modMuxLevers, modMuxReport.
 Single player and multiplayer. Every computer uses its own setup; on a server, the server's setup decides what the server runs.
 
+Changelog 1.0.0.2:
+- CONFLICTS opens on WHO BEATS WHOM: one line per pair of mods, saying which one overwrites, may overwrite, takes over or runs after the other, with buttons to let either one win.
+- Easier to read: only what needs a look is shown first, every pair gets a verdict (Broken, Check, Probably fine, Fine) and a suggested fix, functions are named in words, and the tabs show how many things wait on them.
+- New OVERVIEW tab: everything ModMux found on one page, with what waits for the next load and Undo all.
+- New KEYS tab: keys and buttons used by two mods, or by a mod and the game, in the same situation, with a free key to move one to.
+- New ERRORS tab: one line per mod with its errors and warnings, including scripts that stop while you play.
+- The summary ModMux.log lists both.
+
 Changelog 1.0.0.1:
 - Works in the normal game: finds the mod behind each hook without the developer functions the game hides (1.0.0.0 found no conflicts there).
 - The zip is now FS25_0_ModMux.zip so that it loads first. Delete FS25_ModMux.zip; the settings stay.
@@ -45,13 +57,17 @@ GitHub: https://github.com/DTM-Mods/FS25_ModMux
 
 Wichtig: Lass die Zip-Datei FS25_0_ModMux.zip heißen. Das Spiel lädt Mods in der Reihenfolge ihrer Namen, und ModMux muss vor den Mods laden, die es beobachtet: es sieht jeden Eingriff, während er gemacht wird. Setzt ein Mod eine eigene Version einer Funktion ein, findet ModMux beim Spielen heraus, ob die Eingriffe darunter noch laufen.
 
+Beginne mit ÜBERSICHT: eine Zeile pro Bereich (Mod-Konflikte, Tastenkonflikte, Fehler, Hinweise, Leistung, was auf den nächsten Start wartet), jeweils mit Urteil und einer Taste, die ihn öffnet.
+
 Entscheide pro Funktion oder für ganze Mods:
 - Ein Mod setzt sich bei einer Funktion durch: nur sein Eingriff bleibt dort.
 - Hole einen Eingriff zurück, den ein anderer Mod verworfen hat, damit beide laufen (gemeinsame Kette).
 - Reihe Mods gegeneinander, allgemein oder nur für einen Bereich (Räder, HUD, Wirtschaft, Wetter, KI...). Ein höherer Mod läuft zuletzt und hat das letzte Wort.
-- Drei Ansichten: EINFACH (der Rang), NACH BEREICH (Rang je Bereich), ERWEITERT (jede Funktion mit ihrer ganzen Kette).
+- Vier Ansichten: WER GEGEN WEN (jedes Mod-Paar: welcher den anderen überschreibt oder übernimmt), EINFACH (der Rang), NACH BEREICH (Rang je Bereich), ERWEITERT (jede Funktion mit ihrer ganzen Kette).
 
 Weitere Reiter:
+- TASTEN: Tasten und Knöpfe, die zwei Mods (oder ein Mod und das Spiel) in derselben Lage benutzen, sodass ein Druck zwei Dinge auslöst. Aus deinen eigenen Tasteneinstellungen gelesen.
+- FEHLER: eine Zeile pro Mod mit seinen Fehlern und Warnungen, auch Mods, deren Skripte während des Spiels abbrechen.
 - LIVE: Schalter und Werte, die Mods an ModMux geben, gelten sofort.
 - FAHRZEUG: Messwerte des Fahrzeugs, das du fährst: Geschwindigkeit, Masse, Schaden, Abnutzung, Motortemperatur, Haftung und Schlupf je Rad, die Mods darin.
 - LEISTUNG: Millisekunden pro Bild für jeden Mod, gemessen an deiner Ziel-Bildrate. Parke die Arbeit eines schweren Mods pro Bild, ohne ihn zu deinstallieren.
@@ -68,6 +84,14 @@ Sicherheit:
 Konsole für dedizierte Server: modMux, modMuxPick, modMuxPark, modMuxLevers, modMuxReport.
 Einzel- und Mehrspieler. Jeder Rechner nutzt seine eigenen Einstellungen; auf einem Server entscheiden die des Servers, was der Server ausführt.
 
+Changelog 1.0.0.2:
+- KONFLIKTE öffnet mit WER GEGEN WEN: eine Zeile pro Mod-Paar, welcher den anderen überschreibt, evtl. überschreibt, übernimmt oder nach ihm läuft, mit Tasten, um einen gewinnen zu lassen.
+- Leichter zu lesen: zuerst nur, was angesehen werden sollte, jedes Paar bekommt ein Urteil (Kaputt, Prüfen, Wohl in Ordnung, In Ordnung) und einen Vorschlag, Funktionen stehen in Worten, und die Reiter zeigen, wie viel auf sie wartet.
+- Neuer Reiter ÜBERSICHT: alles, was ModMux gefunden hat, auf einer Seite, mit dem, was auf den nächsten Start wartet, und Alles zurücknehmen.
+- Neuer Reiter TASTEN: Tasten und Knöpfe, die zwei Mods oder ein Mod und das Spiel in derselben Lage benutzen, mit einer freien Taste zum Ausweichen.
+- Neuer Reiter FEHLER: eine Zeile pro Mod mit seinen Fehlern und Warnungen, auch Skripte, die während des Spiels abbrechen.
+- Die Übersicht ModMux.log listet beides.
+
 Changelog 1.0.0.1:
 - Funktioniert im normalen Spiel: findet den Mod hinter jedem Eingriff ohne die Entwicklerfunktionen, die das Spiel verbirgt (1.0.0.0 fand dort keine Konflikte).
 - Die Zip-Datei heißt jetzt FS25_0_ModMux.zip, damit sie zuerst lädt. Lösche FS25_ModMux.zip; die Einstellungen bleiben.
@@ -81,6 +105,8 @@ Changelog 1.0.0.1:
     <extraSourceFiles>
         <sourceFile filename="scripts/ModMuxOrigin.lua"/>
         <sourceFile filename="scripts/ModMuxScan.lua"/>
+        <sourceFile filename="scripts/ModMuxErrors.lua"/>
+        <sourceFile filename="scripts/ModMuxKeys.lua"/>
         <sourceFile filename="scripts/ModMuxLevers.lua"/>
         <sourceFile filename="scripts/ModMuxPerf.lua"/>
         <sourceFile filename="scripts/ModMuxReview.lua"/>

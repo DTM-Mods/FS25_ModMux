@@ -1,0 +1,12 @@
+{
+  "2.jpg": {
+    "title": "Who beats whom",
+    "text": "Every pair of mods that collide: which one overwrites the other, and what to do about it.",
+    "at": "bottom"
+  },
+  "3.jpg": {
+    "title": "One line per pair, explained",
+    "text": "Select a pair: the right side says what is lost and suggests a fix, like letting both run.",
+    "at": "bottom"
+  }
+}
